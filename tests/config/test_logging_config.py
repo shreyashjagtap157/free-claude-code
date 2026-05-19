@@ -6,7 +6,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from config.logging_config import configure_logging
+from config.logging_config import _redact_sensitive_substrings, configure_logging
 
 
 def test_configure_logging_writes_json_to_file(tmp_path):
@@ -81,6 +81,12 @@ def test_bearer_substring_redacted_in_log_file(tmp_path) -> None:
     text = Path(log_file).read_text(encoding="utf-8")
     assert secret not in text
     assert "Bearer" in text
+
+
+def test_redaction_fast_path_leaves_normal_messages_unchanged() -> None:
+    message = "service completed request id=abc123 duration=42ms status=200"
+
+    assert _redact_sensitive_substrings(message) == message
 
 
 def test_httpx_logger_quieted_when_not_verbose_third_party(tmp_path) -> None:

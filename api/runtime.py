@@ -5,6 +5,11 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import time
+try:
+    import psutil
+except ImportError:
+    psutil = None
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -108,6 +113,38 @@ class AppRuntime:
     messaging_platform: MessagingPlatform | None = None
     message_handler: ClaudeMessageHandler | None = None
     cli_manager: CLISessionManager | None = None
+    _start_time: float = field(default_factory=time.time, init=False)
+    _total_requests: int = 0
+    _active_requests: int = 0
+
+    def increment_requests(self) -> None:
+        """Atomically increment total request count."""
+        self._total_requests += 1
+
+    def active_request_start(self) -> None:
+        """Mark an active request started."""
+        self._active_requests += 1
+
+    def active_request_end(self) -> None:
+        """Mark an active request completed."""
+        self._active_requests = max(0, self._active_requests - 1)
+
+    def get_stats(self) -> dict[str, Any]:
+        """Return server runtime statistics."""
+        memory_mb = 0.0
+        if psutil:
+            try:
+                process = psutil.Process(os.getpid())
+                memory_mb = process.memory_info().rss / (1024 * 1024)
+            except Exception:
+                pass
+        
+        return {
+            "uptime_seconds": int(time.time() - self._start_time),
+            "total_requests": self._total_requests,
+            "active_requests": self._active_requests,
+            "memory_mb": round(memory_mb, 1),
+        }
 
     @classmethod
     def for_app(
@@ -123,6 +160,7 @@ class AppRuntime:
         admin_url = local_admin_url(self.settings)
         self._provider_registry = ProviderRegistry()
         self.app.state.provider_registry = self._provider_registry
+        self.app.state.runtime = self
         try:
             warn_if_process_auth_token(self.settings)
             warn_if_weak_auth_token(self.settings)

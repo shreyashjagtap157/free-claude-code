@@ -43,6 +43,12 @@ _AUTH_BEARER_RE = re.compile(
 
 def _redact_sensitive_substrings(message: str) -> str:
     """Remove obvious API tokens and secrets before JSON log line emission."""
+    # Fast path: most log lines do not contain either marker, so skip two regex
+    # scans and the extra string allocation unless the line looks suspicious.
+    lowered = message.lower()
+    if "api.telegram.org" not in lowered and "authorization" not in lowered:
+        return message
+
     text = _TELEGRAM_BOT_RE.sub(r"\1bot<redacted>\3", message)
     return _AUTH_BEARER_RE.sub(r"\1<redacted>", text)
 

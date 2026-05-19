@@ -169,6 +169,7 @@ async def apply_admin_config(
 async def admin_status(request: Request):
     require_loopback_admin(request)
     settings = get_cached_settings()
+    runtime = getattr(request.app.state, "runtime", None)
     registry = getattr(request.app.state, "provider_registry", None)
     cached_models: dict[str, list[str]] = {}
     if isinstance(registry, ProviderRegistry):
@@ -176,6 +177,12 @@ async def admin_status(request: Request):
             provider_id: sorted(model_ids)
             for provider_id, model_ids in registry.cached_model_ids().items()
         }
+    
+    stats = {}
+    from .runtime import AppRuntime
+    if isinstance(runtime, AppRuntime):
+        stats = runtime.get_stats()
+        
     return {
         "status": "running",
         "host": settings.host,
@@ -185,6 +192,7 @@ async def admin_status(request: Request):
         "pending_fields": getattr(request.app.state, "admin_pending_fields", []),
         "provider_status": provider_config_status(),
         "cached_models": cached_models,
+        "stats": stats,
     }
 
 

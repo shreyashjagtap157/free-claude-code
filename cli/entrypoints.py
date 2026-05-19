@@ -77,7 +77,8 @@ def _run_supervised_server(settings: Settings) -> bool:
         asgi_app,
         host=settings.host,
         port=settings.port,
-        log_level="debug",
+        log_level="info",
+        access_log=False,
         timeout_graceful_shutdown=SERVER_GRACEFUL_SHUTDOWN_SECONDS,
     )
     server = uvicorn.Server(config)

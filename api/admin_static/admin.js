@@ -76,6 +76,7 @@ async function load() {
   await refreshLocalStatus();
   updateDirtyState();
   showMessage("");
+  setInterval(refreshStats, 3000);
 }
 
 function updateHeader(status) {
@@ -83,6 +84,35 @@ function updateHeader(status) {
   serverStatus.textContent = "Running";
   serverStatus.className = "status-pill ok";
   byId("modelBadge").textContent = status.model || "";
+  if (status.stats) {
+    updateStatsUI(status.stats);
+  }
+}
+
+function updateStatsUI(stats) {
+  if (!stats) return;
+  byId("statUptime").textContent = formatDuration(stats.uptime_seconds);
+  byId("statTotalRequests").textContent = stats.total_requests;
+  byId("statActiveRequests").textContent = stats.active_requests;
+  byId("statMemory").textContent = stats.memory_mb ? `${stats.memory_mb} MB` : "--";
+}
+
+function formatDuration(seconds) {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  const hours = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  return `${hours}h ${mins}m`;
+}
+
+async function refreshStats() {
+  try {
+    const status = await api("/admin/api/status");
+    state.status = status;
+    updateStatsUI(status.stats);
+  } catch (err) {
+    // Silently ignore background refresh errors
+  }
 }
 
 function renderNav(sections) {
