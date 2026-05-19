@@ -6,10 +6,15 @@ import asyncio
 import os
 import sys
 import time
+
+psutil: Any | None = None
 try:
-    import psutil
+    import psutil as _psutil
+
+    psutil = _psutil
 except ImportError:
-    psutil = None
+    # psutil is optional; keep as None when unavailable
+    pass
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -138,7 +143,7 @@ class AppRuntime:
                 memory_mb = process.memory_info().rss / (1024 * 1024)
             except Exception:
                 pass
-        
+
         return {
             "uptime_seconds": int(time.time() - self._start_time),
             "total_requests": self._total_requests,

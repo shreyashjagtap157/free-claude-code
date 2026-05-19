@@ -187,19 +187,19 @@ def create_app(*, lifespan_enabled: bool = True) -> FastAPI:
 
             # 2. Security Headers
             response.headers.update(SECURITY_HEADERS)
-            
+
             # 3. Log request duration and metrics
             duration = time.perf_counter() - start_time
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            
+
             if isinstance(runtime, AppRuntime):
                 runtime.active_request_end()
-            
+
             client_host = request.client.host if request.client else "unknown"
             logger.info(
-                f"[{timestamp}] {client_host} - \"{request.method} {request.url.path}\" {response.status_code} (took {duration:.3f}s)"
+                f'[{timestamp}] {client_host} - "{request.method} {request.url.path}" {response.status_code} (took {duration:.3f}s)'
             )
-            
+
             return response
 
     # Register routes

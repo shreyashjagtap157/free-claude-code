@@ -177,12 +177,13 @@ async def admin_status(request: Request):
             provider_id: sorted(model_ids)
             for provider_id, model_ids in registry.cached_model_ids().items()
         }
-    
+
     stats = {}
     from .runtime import AppRuntime
+
     if isinstance(runtime, AppRuntime):
         stats = runtime.get_stats()
-        
+
     return {
         "status": "running",
         "host": settings.host,
