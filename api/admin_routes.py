@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from config.settings import Settings
 from config.settings import get_settings as get_cached_settings
+from core.call_log import recent as recent_calls
 from providers.registry import ProviderRegistry
 
 from .admin_config import (
@@ -195,6 +196,12 @@ async def admin_status(request: Request):
         "cached_models": cached_models,
         "stats": stats,
     }
+
+
+@router.get("/admin/api/calls")
+async def get_api_calls(request: Request):
+    require_loopback_admin(request)
+    return {"calls": recent_calls()}
 
 
 @router.get("/admin/api/providers/local-status")

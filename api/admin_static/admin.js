@@ -484,9 +484,54 @@ function showMessage(message, kind = "") {
   area.style.animation = "slide-up 0.3s ease-out both";
 }
 
+function renderApiCalls(data) {
+  const container = byId("apiCalls");
+  const calls = data.calls || [];
+  if (!calls.length) {
+    container.innerHTML = `<p class="field-description">No API calls yet.</p>`;
+    return;
+  }
+  const table = document.createElement("table");
+  table.className = "api-calls-table";
+  table.innerHTML = `<thead><tr>
+    <th>Time</th>
+    <th>Provider</th>
+    <th>Model</th>
+    <th>Status</th>
+    <th>Duration</th>
+    <th>In</th>
+    <th>Out</th>
+    <th>Error</th>
+  </tr></thead><tbody>${calls.map(call => `<tr>
+    <td>${new Date(call.timestamp * 1000).toLocaleTimeString()}</td>
+    <td>${call.provider}</td>
+    <td>${call.model}</td>
+    <td><span class="status-pill ${call.status === 'ok' ? 'ok' : 'error'}">${call.status}</span></td>
+    <td>${call.duration_s}s</td>
+    <td>${call.input_tokens || ''}</td>
+    <td>${call.output_tokens || ''}</td>
+    <td class="error-text">${call.error || ''}</td>
+  </tr>`).join('')}</tbody></table>`;
+  container.innerHTML = "";
+  container.appendChild(table);
+}
+
+async function refreshCalls() {
+  try {
+    const data = await api("/admin/api/calls");
+    renderApiCalls(data);
+  } catch (err) {
+    // Silently ignore background refresh errors
+  }
+}
+
 byId("validateButton").addEventListener("click", () => validate(true));
 byId("applyButton").addEventListener("click", apply);
 byId("refreshLocal").addEventListener("click", refreshLocalStatus);
+byId("refreshCalls").addEventListener("click", refreshCalls);
+
+// Auto-refresh API calls every 3 seconds
+setInterval(refreshCalls, 3000);
 
 load().catch((error) => {
   byId("serverStatus").textContent = "Error";

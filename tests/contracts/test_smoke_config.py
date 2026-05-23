@@ -27,6 +27,10 @@ def _settings(**overrides):
         "open_router_api_key": "",
         "deepseek_api_key": "",
         "wafer_api_key": "",
+        "gemini_api_key": "",
+        "opencode_api_key": "",
+        "zai_api_key": "",
+        "fireworks_api_key": "",
         "lm_studio_base_url": "",
         "llamacpp_base_url": "",
         "ollama_base_url": "http://localhost:11434",
@@ -115,6 +119,53 @@ def test_wafer_provider_configuration_uses_api_key(monkeypatch) -> None:
     models = config.provider_smoke_models()
     assert models[0].provider == "wafer"
     assert models[0].full_model == PROVIDER_SMOKE_DEFAULT_MODELS["wafer"]
+
+
+def test_opencode_provider_configuration_uses_api_key(monkeypatch) -> None:
+    monkeypatch.delenv("FCC_SMOKE_MODEL_OPENCODE", raising=False)
+    config = _smoke_config(
+        settings=_settings(
+            model="ollama/llama3.1",
+            ollama_base_url="",
+            opencode_api_key="opencode-key",
+        )
+    )
+
+    assert config.has_provider_configuration("opencode")
+    assert config.has_provider_configuration("opencode_go")
+    models = config.provider_smoke_models()
+    assert any(m.provider == "opencode" for m in models)
+    assert any(m.provider == "opencode_go" for m in models)
+
+
+def test_zai_provider_configuration_uses_api_key(monkeypatch) -> None:
+    monkeypatch.delenv("FCC_SMOKE_MODEL_ZAI", raising=False)
+    config = _smoke_config(
+        settings=_settings(
+            model="ollama/llama3.1",
+            ollama_base_url="",
+            zai_api_key="zai-key",
+        )
+    )
+
+    assert config.has_provider_configuration("zai")
+    models = config.provider_smoke_models()
+    assert models[0].provider == "zai"
+
+
+def test_fireworks_provider_configuration_uses_api_key(monkeypatch) -> None:
+    monkeypatch.delenv("FCC_SMOKE_MODEL_FIREWORKS", raising=False)
+    config = _smoke_config(
+        settings=_settings(
+            model="ollama/llama3.1",
+            ollama_base_url="",
+            fireworks_api_key="fireworks-key",
+        )
+    )
+
+    assert config.has_provider_configuration("fireworks")
+    models = config.provider_smoke_models()
+    assert models[0].provider == "fireworks"
 
 
 def test_provider_smoke_model_override_accepts_model_name_without_prefix(

@@ -48,7 +48,13 @@ PROVIDER_SMOKE_DEFAULT_MODELS: dict[str, str] = {
     "lmstudio": "lmstudio/local-model",
     "llamacpp": "llamacpp/local-model",
     "ollama": "ollama/llama3.1",
+    "kimi": "kimi/kimi-k2.5",
     "wafer": "wafer/DeepSeek-V4-Pro",
+    "opencode": "opencode/anthropic/claude-sonnet-4-20250514",
+    "opencode_go": "opencode_go/anthropic/claude-sonnet-4-20250514",
+    "zai": "zai/anthropic/claude-sonnet-4-20250514",
+    "fireworks": "fireworks/anthropic/claude-sonnet-4-20250514",
+    "google_ai_studio": "google_ai_studio/gemini-2.0-flash",
 }
 
 NVIDIA_NIM_CLI_DEFAULT_MODELS: tuple[str, ...] = (
@@ -231,6 +237,16 @@ class SmokeConfig:
             return bool(self.settings.ollama_base_url.strip())
         if provider == "wafer":
             return bool(self.settings.wafer_api_key.strip())
+        if provider == "google_ai_studio":
+            return bool(self.settings.gemini_api_key.strip())
+        if provider == "opencode":
+            return bool(self.settings.opencode_api_key.strip())
+        if provider == "opencode_go":
+            return bool(self.settings.opencode_api_key.strip())
+        if provider == "zai":
+            return bool(self.settings.zai_api_key.strip())
+        if provider == "fireworks":
+            return bool(self.settings.fireworks_api_key.strip())
         return False
 
 

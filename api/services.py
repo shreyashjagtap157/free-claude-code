@@ -12,7 +12,11 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from config.settings import Settings
-from core.anthropic import get_token_count, get_user_facing_error_message
+from core.anthropic import (
+    get_token_count,
+    get_user_facing_error_message,
+    trim_messages_for_context_budget,
+)
 from core.anthropic.sse import ANTHROPIC_SSE_RESPONSE_HEADERS
 from core.trace import api_messages_request_snapshot, trace_event, traced_async_stream
 from providers.base import BaseProvider
@@ -99,6 +103,24 @@ class ClaudeProxyService:
         self._model_router = model_router or ModelRouter(settings)
         self._token_counter = token_counter
 
+    def _apply_context_trimming(self, request_data: MessagesRequest) -> MessagesRequest:
+        """Apply server-side context trimming for providers without prompt caching."""
+        max_ctx = self._settings.max_context_tokens
+        max_tool = self._settings.max_tool_result_tokens
+        if max_ctx <= 0 and max_tool <= 0:
+            return request_data
+
+        trimmed_messages = trim_messages_for_context_budget(
+            request_data.messages,
+            request_data.system,
+            request_data.tools,
+            max_context_tokens=max_ctx,
+            max_tool_result_tokens=max_tool,
+        )
+        if trimmed_messages is request_data.messages:
+            return request_data
+        return request_data.model_copy(update={"messages": trimmed_messages})
+
     def create_message(self, request_data: MessagesRequest) -> object:
         """Create a message response or streaming response."""
         try:
@@ -149,9 +171,14 @@ class ClaudeProxyService:
                 return optimized
             logger.debug("No optimization matched, routing to provider")
 
+            # Apply context trimming for OpenAI Chat upstreams (no prompt caching).
+            effective_request = routed.request
+            if routed.resolved.provider_id in _OPENAI_CHAT_UPSTREAM_IDS:
+                effective_request = self._apply_context_trimming(routed.request)
+
             provider = self._provider_getter(routed.resolved.provider_id)
             provider.preflight_stream(
-                routed.request,
+                effective_request,
                 thinking_enabled=routed.resolved.thinking_enabled,
             )
 
@@ -162,7 +189,7 @@ class ClaudeProxyService:
                 provider_id=routed.resolved.provider_id,
                 provider_model=routed.resolved.provider_model,
                 provider_model_ref=routed.resolved.provider_model_ref,
-                gateway_model=routed.request.model,
+                gateway_model=effective_request.model,
                 thinking_enabled=routed.resolved.thinking_enabled,
             )
 
@@ -172,24 +199,26 @@ class ClaudeProxyService:
                     stage="ingress",
                     event="api.request.received",
                     source="api",
-                    message_count=len(routed.request.messages),
-                    snapshot=api_messages_request_snapshot(routed.request),
+                    message_count=len(effective_request.messages),
+                    snapshot=api_messages_request_snapshot(effective_request),
                 )
 
                 if self._settings.log_raw_api_payloads:
                     logger.debug(
-                        "FULL_PAYLOAD [{}]: {}", request_id, routed.request.model_dump()
+                        "FULL_PAYLOAD [{}]: {}",
+                        request_id,
+                        effective_request.model_dump(),
                     )
 
                 input_tokens = self._token_counter(
-                    routed.request.messages,
-                    routed.request.system,
-                    routed.request.tools,
+                    effective_request.messages,
+                    effective_request.system,
+                    effective_request.tools,
                 )
 
                 streamed = traced_async_stream(
                     provider.stream_response(
-                        routed.request,
+                        effective_request,
                         input_tokens=input_tokens,
                         request_id=request_id,
                         thinking_enabled=routed.resolved.thinking_enabled,
@@ -202,7 +231,7 @@ class ClaudeProxyService:
                     extra={
                         "request_id": request_id,
                         "provider_id": routed.resolved.provider_id,
-                        "gateway_model": routed.request.model,
+                        "gateway_model": effective_request.model,
                     },
                 )
                 return anthropic_sse_streaming_response(streamed)

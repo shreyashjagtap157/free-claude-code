@@ -6,6 +6,7 @@ in separate modules; do not list them as subclasses of this class.
 
 import asyncio
 import json
+import time
 import uuid
 from abc import abstractmethod
 from collections.abc import AsyncIterator, Iterator
@@ -23,6 +24,8 @@ from core.anthropic import (
     append_request_id,
     map_stop_reason,
 )
+from core.call_log import ApiCallRecord
+from core.call_log import push as push_call_log
 from core.trace import provider_chat_body_snapshot, trace_event
 from providers.base import BaseProvider, ProviderConfig
 from providers.error_mapping import (
@@ -343,10 +346,11 @@ class OpenAIChatTransport(BaseProvider):
     ) -> AsyncIterator[str]:
         """Shared streaming implementation."""
         tag = self._provider_name
+        model = request.model
         message_id = f"msg_{uuid.uuid4()}"
         sse = SSEBuilder(
             message_id,
-            request.model,
+            model,
             input_tokens,
             log_raw_events=self._config.log_raw_sse_events,
         )
@@ -366,7 +370,10 @@ class OpenAIChatTransport(BaseProvider):
             body=provider_chat_body_snapshot(body),
         )
 
+        logger.info("API_CALL | {} | START | model={}", tag, model)
+
         yield sse.message_start()
+        start_time = time.monotonic()
 
         think_parser = ThinkTagParser()
         heuristic_parser = HeuristicToolParser()
@@ -459,6 +466,23 @@ class OpenAIChatTransport(BaseProvider):
             except asyncio.CancelledError, GeneratorExit:
                 raise
             except Exception as e:
+                duration = time.monotonic() - start_time
+                logger.info(
+                    "API_CALL | {} | ERR  | model={} | duration={:.1f}s | {}",
+                    tag,
+                    model,
+                    duration,
+                    type(e).__name__,
+                )
+                push_call_log(
+                    ApiCallRecord(
+                        provider=tag,
+                        model=model,
+                        status="error",
+                        duration_s=duration,
+                        error=f"{type(e).__name__}: {e}",
+                    )
+                )
                 self._log_stream_transport_error(tag, req_tag, e, request_id=request_id)
                 mapped_e = map_error(e, rate_limiter=self._global_rate_limiter)
                 base_message = user_visible_message_for_mapped_provider_error(
@@ -558,6 +582,25 @@ class OpenAIChatTransport(BaseProvider):
                     provider_input,
                     provider_input - input_tokens,
                 )
+        duration = time.monotonic() - start_time
+        logger.info(
+            "API_CALL | {} | OK   | model={} | in={} | out={} | duration={:.1f}s",
+            tag,
+            model,
+            input_tokens,
+            output_tokens,
+            duration,
+        )
+        push_call_log(
+            ApiCallRecord(
+                provider=tag,
+                model=model,
+                status="ok",
+                duration_s=duration,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+        )
         trace_event(
             stage="provider",
             event="provider.response.completed",

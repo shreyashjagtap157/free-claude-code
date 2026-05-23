@@ -578,6 +578,54 @@ textarea {
   gap: 8px;
 }
 
+/* API Calls Table */
+.api-calls-container {
+  margin-top: 14px;
+  overflow-x: auto;
+}
+
+.api-calls-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+.api-calls-table th {
+  text-align: left;
+  padding: 8px 10px;
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.api-calls-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--glass-border);
+  white-space: nowrap;
+}
+
+.api-calls-table tbody tr:hover {
+  background: var(--glass-bg);
+}
+
+.api-calls-table .status-pill {
+  font-size: 10px;
+  min-height: 22px;
+  padding: 2px 8px;
+}
+
+.api-calls-table .error-text {
+  color: var(--error);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 @media (max-width: 900px) {
   .app-shell {
     display: block;

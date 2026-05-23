@@ -1,6 +1,7 @@
 """Anthropic protocol helpers shared across API, providers, and integrations."""
 
 from .content import extract_text_from_content, get_block_attr, get_block_type
+from .context_trimmer import trim_messages_for_context_budget
 from .conversion import (
     AnthropicToOpenAIConverter,
     OpenAIConversionError,
@@ -43,4 +44,5 @@ __all__ = [
     "map_stop_reason",
     "sanitize_native_messages_thinking_policy",
     "set_if_not_none",
+    "trim_messages_for_context_budget",
 ]

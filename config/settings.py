@@ -120,6 +120,18 @@ class Settings(BaseSettings):
     # ==================== Wafer Config ====================
     wafer_api_key: str = Field(default="", validation_alias="WAFER_API_KEY")
 
+    # ==================== Google AI Studio (Gemini) Config ====================
+    gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")
+
+    # ==================== OpenCode Zen / OpenCode Go Config ====================
+    opencode_api_key: str = Field(default="", validation_alias="OPENCODE_API_KEY")
+
+    # ==================== Z.ai Config ====================
+    zai_api_key: str = Field(default="", validation_alias="ZAI_API_KEY")
+
+    # ==================== Fireworks AI Config ====================
+    fireworks_api_key: str = Field(default="", validation_alias="FIREWORKS_API_KEY")
+
     # ==================== Messaging Platform Selection ====================
     # Valid: "telegram" | "discord" | "none"
     messaging_platform: str = Field(
@@ -171,6 +183,11 @@ class Settings(BaseSettings):
     llamacpp_proxy: str = Field(default="", validation_alias="LLAMACPP_PROXY")
     kimi_proxy: str = Field(default="", validation_alias="KIMI_PROXY")
     wafer_proxy: str = Field(default="", validation_alias="WAFER_PROXY")
+    gemini_proxy: str = Field(default="", validation_alias="GEMINI_PROXY")
+    opencode_proxy: str = Field(default="", validation_alias="OPENCODE_PROXY")
+    opencode_go_proxy: str = Field(default="", validation_alias="OPENCODE_GO_PROXY")
+    zai_proxy: str = Field(default="", validation_alias="ZAI_PROXY")
+    fireworks_proxy: str = Field(default="", validation_alias="FIREWORKS_PROXY")
 
     # ==================== Provider Rate Limiting ====================
     provider_rate_limit: int = Field(default=40, validation_alias="PROVIDER_RATE_LIMIT")
@@ -222,6 +239,14 @@ class Settings(BaseSettings):
     enable_title_generation_skip: bool = True
     enable_suggestion_mode_skip: bool = True
     enable_filepath_extraction_mock: bool = True
+
+    # ==================== Context Management ====================
+    max_context_tokens: int = Field(
+        default=40000, validation_alias="MAX_CONTEXT_TOKENS"
+    )
+    max_tool_result_tokens: int = Field(
+        default=4000, validation_alias="MAX_TOOL_RESULT_TOKENS"
+    )
 
     # ==================== Local web server tools (web_search / web_fetch) ====================
     # Off by default: these tools perform outbound HTTP from the proxy (SSRF risk).

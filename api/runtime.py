@@ -6,15 +6,6 @@ import asyncio
 import os
 import sys
 import time
-
-psutil: Any | None = None
-try:
-    import psutil as _psutil
-
-    psutil = _psutil
-except ImportError:
-    # psutil is optional; keep as None when unavailable
-    pass
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -25,6 +16,16 @@ from api.admin_urls import local_admin_url, local_proxy_root_url
 from config.settings import Settings, get_settings
 from providers.exceptions import ServiceUnavailableError
 from providers.registry import ProviderRegistry
+
+psutil: Any | None = None
+try:
+    import psutil as _psutil
+
+    psutil = _psutil
+except ImportError:
+    # psutil is optional; keep as None when unavailable
+    pass
+
 
 if TYPE_CHECKING:
     from cli.manager import CLISessionManager

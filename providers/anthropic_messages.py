@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import time
 from collections.abc import AsyncIterator, Iterator
 from typing import Any, Literal
 
@@ -22,6 +23,8 @@ from core.anthropic.native_sse_block_policy import (
     NativeSseBlockPolicyState,
     transform_native_sse_block_event,
 )
+from core.call_log import ApiCallRecord
+from core.call_log import push as push_call_log
 from core.trace import provider_native_messages_body_snapshot, trace_event
 from providers.base import BaseProvider, ProviderConfig
 from providers.error_mapping import (
@@ -346,9 +349,13 @@ class AnthropicMessagesTransport(BaseProvider):
     ) -> AsyncIterator[str]:
         """Stream response via a native Anthropic-compatible messages endpoint."""
         tag = self._provider_name
+        model = request.model
         req_tag = f" request_id={request_id}" if request_id else ""
         body = self._build_request_body(request, thinking_enabled=thinking_enabled)
         thinking_enabled = self._is_thinking_enabled(request, thinking_enabled)
+
+        logger.info("API_CALL | {} | START | model={}", tag, model)
+        start_time = time.monotonic()
 
         trace_event(
             stage="provider",
@@ -399,6 +406,22 @@ class AnthropicMessagesTransport(BaseProvider):
                     emitted_tracker.feed(chunk)
                     yield chunk
 
+                duration = time.monotonic() - start_time
+                logger.info(
+                    "API_CALL | {} | OK   | model={} | chunks={} | duration={:.1f}s",
+                    tag,
+                    model,
+                    chunk_count,
+                    duration,
+                )
+                push_call_log(
+                    ApiCallRecord(
+                        provider=tag,
+                        model=model,
+                        status="ok",
+                        duration_s=duration,
+                    )
+                )
                 trace_event(
                     stage="provider",
                     event="provider.response.completed",
@@ -410,6 +433,23 @@ class AnthropicMessagesTransport(BaseProvider):
                 )
 
             except Exception as error:
+                duration = time.monotonic() - start_time
+                logger.info(
+                    "API_CALL | {} | ERR  | model={} | duration={:.1f}s | {}",
+                    tag,
+                    model,
+                    duration,
+                    type(error).__name__,
+                )
+                push_call_log(
+                    ApiCallRecord(
+                        provider=tag,
+                        model=model,
+                        status="error",
+                        duration_s=duration,
+                        error=f"{type(error).__name__}: {error}",
+                    )
+                )
                 if not isinstance(error, httpx.HTTPStatusError):
                     self._log_stream_transport_error(
                         tag, req_tag, error, request_id=request_id

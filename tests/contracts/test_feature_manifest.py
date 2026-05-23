@@ -6,12 +6,16 @@ from pathlib import Path
 from messaging.platforms.factory import create_messaging_platform
 from providers.base import BaseProvider
 from providers.deepseek import DeepSeekProvider
+from providers.fireworks import FireworksProvider
+from providers.google_ai_studio import GoogleAIStudioProvider
 from providers.llamacpp import LlamaCppProvider
 from providers.lmstudio import LMStudioProvider
 from providers.nvidia_nim import NvidiaNimProvider
 from providers.ollama import OllamaProvider
 from providers.open_router import OpenRouterProvider
+from providers.opencode import OpenCodeProvider
 from providers.wafer import WaferProvider
+from providers.zai import ZaiProvider
 from smoke.features import FEATURE_INVENTORY, README_FEATURES, feature_ids
 
 VALID_SOURCE = {"readme", "public_surface"}
@@ -75,6 +79,10 @@ def test_provider_and_platform_registries_include_advertised_builtins() -> None:
         "llamacpp": LlamaCppProvider,
         "ollama": OllamaProvider,
         "wafer": WaferProvider,
+        "opencode": OpenCodeProvider,
+        "zai": ZaiProvider,
+        "fireworks": FireworksProvider,
+        "google_ai_studio": GoogleAIStudioProvider,
     }
     for provider_class in provider_classes.values():
         assert issubclass(provider_class, BaseProvider)

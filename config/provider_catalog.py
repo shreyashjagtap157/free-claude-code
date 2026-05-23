@@ -15,6 +15,7 @@ TransportType = Literal["openai_chat", "anthropic_messages"]
 NVIDIA_NIM_DEFAULT_BASE = "https://integrate.api.nvidia.com/v1"
 KIMI_DEFAULT_BASE = "https://api.moonshot.ai/v1"
 WAFER_DEFAULT_BASE = "https://pass.wafer.ai/v1"
+GEMINI_DEFAULT_BASE = "https://generativelanguage.googleapis.com/v1beta/openai/"
 # DeepSeek Anthropic-compatible Messages API (not OpenAI ``/v1`` chat completions).
 DEEPSEEK_ANTHROPIC_DEFAULT_BASE = "https://api.deepseek.com/anthropic"
 # Historical export name: DeepSeek upstream is the native Anthropic path above.
@@ -23,6 +24,10 @@ OPENROUTER_DEFAULT_BASE = "https://openrouter.ai/api/v1"
 LMSTUDIO_DEFAULT_BASE = "http://localhost:1234/v1"
 LLAMACPP_DEFAULT_BASE = "http://localhost:8080/v1"
 OLLAMA_DEFAULT_BASE = "http://localhost:11434"
+OPENCODE_DEFAULT_BASE = "https://opencode.ai/zen/v1"
+OPENCODE_GO_DEFAULT_BASE = "https://opencode.ai/zen/go/v1"
+ZAI_DEFAULT_BASE = "https://api.z.ai/api/coding/paas/v4"
+FIREWORKS_DEFAULT_BASE = "https://api.fireworks.ai/inference/v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +127,55 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         default_base_url=WAFER_DEFAULT_BASE,
         proxy_attr="wafer_proxy",
         capabilities=("chat", "streaming", "tools", "thinking", "native_anthropic"),
+    ),
+    "opencode": ProviderDescriptor(
+        provider_id="opencode",
+        transport_type="openai_chat",
+        credential_env="OPENCODE_API_KEY",
+        credential_url="https://opencode.ai/auth",
+        credential_attr="opencode_api_key",
+        default_base_url=OPENCODE_DEFAULT_BASE,
+        proxy_attr="opencode_proxy",
+        capabilities=("chat", "streaming", "tools", "thinking", "rate_limit"),
+    ),
+    "opencode_go": ProviderDescriptor(
+        provider_id="opencode_go",
+        transport_type="openai_chat",
+        credential_env="OPENCODE_API_KEY",
+        credential_url="https://opencode.ai/auth",
+        credential_attr="opencode_api_key",
+        default_base_url=OPENCODE_GO_DEFAULT_BASE,
+        proxy_attr="opencode_go_proxy",
+        capabilities=("chat", "streaming", "tools", "thinking", "rate_limit"),
+    ),
+    "zai": ProviderDescriptor(
+        provider_id="zai",
+        transport_type="openai_chat",
+        credential_env="ZAI_API_KEY",
+        credential_attr="zai_api_key",
+        default_base_url=ZAI_DEFAULT_BASE,
+        proxy_attr="zai_proxy",
+        capabilities=("chat", "streaming", "tools", "thinking", "rate_limit"),
+    ),
+    "fireworks": ProviderDescriptor(
+        provider_id="fireworks",
+        transport_type="openai_chat",
+        credential_env="FIREWORKS_API_KEY",
+        credential_url="https://fireworks.ai/account/api-keys",
+        credential_attr="fireworks_api_key",
+        default_base_url=FIREWORKS_DEFAULT_BASE,
+        proxy_attr="fireworks_proxy",
+        capabilities=("chat", "streaming", "tools", "thinking", "rate_limit"),
+    ),
+    "google_ai_studio": ProviderDescriptor(
+        provider_id="google_ai_studio",
+        transport_type="openai_chat",
+        credential_env="GEMINI_API_KEY",
+        credential_url="https://aistudio.google.com/apikeys",
+        credential_attr="gemini_api_key",
+        default_base_url=GEMINI_DEFAULT_BASE,
+        proxy_attr="gemini_proxy",
+        capabilities=("chat", "streaming", "tools"),
     ),
 }
 

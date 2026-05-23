@@ -8,7 +8,9 @@ included at top level for easy grep/filter.
 
 import json
 import logging
+import os
 import re
+import sys
 import threading
 from pathlib import Path
 
@@ -142,6 +144,19 @@ def configure_logging(
         rotation="50 MB",
         enqueue=True,
     )
+
+    # Also log human-readable messages to stderr so ``fcc-server`` CLI output
+    # shows API call info and other INFO-level updates by default.
+    # Set FCC_CONSOLE_LOGS=0 to silence console output.
+    if os.environ.get("FCC_CONSOLE_LOGS", "1").lower() not in ("0", "false", "no"):
+        logger.add(
+            sys.stderr,
+            level="INFO",
+            format="{time:YYYY-MM-DD HH:mm:ss.SSS} {level: <8} {message}",
+            colorize=False,
+            backtrace=False,
+            diagnose=False,
+        )
 
     # Intercept stdlib logging: route all root logger output to loguru
     intercept = InterceptHandler()
