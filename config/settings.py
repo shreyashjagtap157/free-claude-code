@@ -242,10 +242,10 @@ class Settings(BaseSettings):
 
     # ==================== Context Management ====================
     max_context_tokens: int = Field(
-        default=40000, validation_alias="MAX_CONTEXT_TOKENS"
+        default=15000, validation_alias="MAX_CONTEXT_TOKENS"
     )
     max_tool_result_tokens: int = Field(
-        default=4000, validation_alias="MAX_TOOL_RESULT_TOKENS"
+        default=2000, validation_alias="MAX_TOOL_RESULT_TOKENS"
     )
 
     # ==================== Local web server tools (web_search / web_fetch) ====================

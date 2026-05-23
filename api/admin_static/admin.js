@@ -8,32 +8,42 @@ const state = {
 
 const MASKED_SECRET = "********";
 
+function escapeHtml(str) {
+  if (str === null || str === undefined) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 const byId = (id) => document.getElementById(id);
 
 function sourceLabel(source) {
-  const labels = {
-    default: "default",
-    template: "template",
-    repo_env: "repo .env",
-    managed_env: "managed",
-    explicit_env_file: "FCC_ENV_FILE",
-    process: "process env",
-  };
-  return labels[source] || source;
+  const labels = new Map([
+    ["default", "default"],
+    ["template", "template"],
+    ["repo_env", "repo .env"],
+    ["managed_env", "managed"],
+    ["explicit_env_file", "FCC_ENV_FILE"],
+    ["process", "process env"],
+  ]);
+  return labels.has(source) ? labels.get(source) : source;
 }
 
 function providerName(providerId) {
-  const names = {
-    nvidia_nim: "NVIDIA NIM",
-    open_router: "OpenRouter",
-    deepseek: "DeepSeek",
-    lmstudio: "LM Studio",
-    llamacpp: "llama.cpp",
-    ollama: "Ollama",
-    kimi: "Kimi",
-    wafer: "Wafer",
-  };
-  if (names[providerId]) return names[providerId];
+  const names = new Map([
+    ["nvidia_nim", "NVIDIA NIM"],
+    ["open_router", "OpenRouter"],
+    ["deepseek", "DeepSeek"],
+    ["lmstudio", "LM Studio"],
+    ["llamacpp", "llama.cpp"],
+    ["ollama", "Ollama"],
+    ["kimi", "Kimi"],
+    ["wafer", "Wafer"],
+  ]);
+  if (names.has(providerId)) return names.get(providerId);
   return providerId
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
@@ -118,7 +128,7 @@ async function refreshStats() {
 function renderNav(sections) {
   const nav = byId("sectionNav");
   const fragment = document.createDocumentFragment();
-  
+
   sections.forEach((section, index) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -136,12 +146,12 @@ function renderNav(sections) {
   nav.addEventListener("click", (e) => {
     const btn = e.target.closest(".nav-link");
     if (!btn) return;
-    
+
     document.querySelectorAll(".nav-link").forEach((link) => {
       link.classList.remove("active");
     });
     btn.classList.add("active");
-    
+
     const sectionId = btn.dataset.section;
     byId(`section-${sectionId}`).scrollIntoView({ behavior: "smooth" });
   });
@@ -150,7 +160,7 @@ function renderNav(sections) {
 function renderProviders(providerStatus) {
   const grid = byId("providerGrid");
   const fragment = document.createDocumentFragment();
-  
+
   providerStatus.forEach((provider, index) => {
     const card = document.createElement("article");
     card.className = "provider-card";
@@ -184,7 +194,7 @@ function renderProviders(providerStatus) {
     card.append(title, meta, button);
     fragment.appendChild(card);
   });
-  
+
   grid.innerHTML = "";
   grid.appendChild(fragment);
 }
@@ -353,9 +363,11 @@ function changedValues() {
   const values = {};
   document.querySelectorAll("[data-key]").forEach((input) => {
     if (input.disabled || !input.matches("input, select, textarea")) return;
+    const key = input.dataset.key;
+    if (key === "__proto__" || key === "constructor" || key === "prototype") return;
     const value = readFieldValue(input);
     if (value !== input.dataset.original) {
-      values[input.dataset.key] = value;
+      values[key] = value;
     }
   });
   return values;
@@ -488,30 +500,59 @@ function renderApiCalls(data) {
   const container = byId("apiCalls");
   const calls = data.calls || [];
   if (!calls.length) {
-    container.innerHTML = `<p class="field-description">No API calls yet.</p>`;
+    container.innerHTML = "";
+    const p = document.createElement("p");
+    p.className = "field-description";
+    p.textContent = "No API calls yet.";
+    container.appendChild(p);
     return;
   }
   const table = document.createElement("table");
   table.className = "api-calls-table";
-  table.innerHTML = `<thead><tr>
-    <th>Time</th>
-    <th>Provider</th>
-    <th>Model</th>
-    <th>Status</th>
-    <th>Duration</th>
-    <th>In</th>
-    <th>Out</th>
-    <th>Error</th>
-  </tr></thead><tbody>${calls.map(call => `<tr>
-    <td>${new Date(call.timestamp * 1000).toLocaleTimeString()}</td>
-    <td>${call.provider}</td>
-    <td>${call.model}</td>
-    <td><span class="status-pill ${call.status === 'ok' ? 'ok' : 'error'}">${call.status}</span></td>
-    <td>${call.duration_s}s</td>
-    <td>${call.input_tokens || ''}</td>
-    <td>${call.output_tokens || ''}</td>
-    <td class="error-text">${call.error || ''}</td>
-  </tr>`).join('')}</tbody></table>`;
+  const thead = document.createElement("thead");
+  const headerRow = document.createElement("tr");
+  const columns = ["Time", "Provider", "Model", "Status", "Duration", "In", "Out", "Error"];
+  columns.forEach((colName) => {
+    const th = document.createElement("th");
+    th.textContent = colName;
+    headerRow.appendChild(th);
+  });
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  calls.forEach((call) => {
+    const row = document.createElement("tr");
+    const tdTime = document.createElement("td");
+    tdTime.textContent = new Date(call.timestamp * 1000).toLocaleTimeString();
+    row.appendChild(tdTime);
+    const tdProvider = document.createElement("td");
+    tdProvider.textContent = call.provider || "";
+    row.appendChild(tdProvider);
+    const tdModel = document.createElement("td");
+    tdModel.textContent = call.model || "";
+    row.appendChild(tdModel);
+    const tdStatus = document.createElement("td");
+    const span = document.createElement("span");
+    span.className = `status-pill ${call.status === "ok" ? "ok" : "error"}`;
+    span.textContent = call.status || "";
+    tdStatus.appendChild(span);
+    row.appendChild(tdStatus);
+    const tdDuration = document.createElement("td");
+    tdDuration.textContent = call.duration_s ? `${call.duration_s}s` : "0s";
+    row.appendChild(tdDuration);
+    const tdIn = document.createElement("td");
+    tdIn.textContent = call.input_tokens || "";
+    row.appendChild(tdIn);
+    const tdOut = document.createElement("td");
+    tdOut.textContent = call.output_tokens || "";
+    row.appendChild(tdOut);
+    const tdError = document.createElement("td");
+    tdError.className = "error-text";
+    tdError.textContent = call.error || "";
+    row.appendChild(tdError);
+    tbody.appendChild(row);
+  });
+  table.appendChild(tbody);
   container.innerHTML = "";
   container.appendChild(table);
 }

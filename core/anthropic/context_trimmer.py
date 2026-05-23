@@ -278,13 +278,15 @@ def _enforce_token_budget(
     if current_tokens <= max_context_tokens:
         return messages
 
-    # We always keep: first message (index 0) and the last 4 messages
-    # (2 recent user/assistant pairs).  Everything between is droppable.
-    keep_tail = min(4, len(messages))
+    # We always keep: first message (index 0) and the last 2 messages
+    # (1 recent user/assistant pair).  Everything between is droppable.
+    keep_tail = min(2, len(messages))
     keep_head = 1
 
-    if len(messages) <= keep_head + keep_tail:
-        # Conversation is too short to meaningfully trim.
+    if (
+        len(messages) <= keep_head + keep_tail
+        and get_token_count(messages, system, tools) <= max_context_tokens
+    ):
         return messages
 
     head = messages[:keep_head]
