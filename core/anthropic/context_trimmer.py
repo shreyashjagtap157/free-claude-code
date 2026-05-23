@@ -274,7 +274,13 @@ def _enforce_token_budget(
     if max_context_tokens <= 0 or not messages:
         return messages
 
-    current_tokens = get_token_count(messages, system, tools)
+    # Pre-calculate base token count for system + tools.
+    base_tokens = get_token_count([], system, tools)
+
+    # Pre-calculate token count for each individual message.
+    msg_tokens = [get_token_count([msg]) for msg in messages]
+    current_tokens = base_tokens + sum(msg_tokens)
+
     if current_tokens <= max_context_tokens:
         return messages
 
@@ -283,15 +289,19 @@ def _enforce_token_budget(
     keep_tail = min(2, len(messages))
     keep_head = 1
 
-    if (
-        len(messages) <= keep_head + keep_tail
-        and get_token_count(messages, system, tools) <= max_context_tokens
-    ):
+    if len(messages) <= keep_head + keep_tail:
         return messages
 
     head = messages[:keep_head]
     droppable = list(messages[keep_head:-keep_tail])
     tail = messages[-keep_tail:]
+
+    head_tokens = msg_tokens[0]
+    tail_tokens = sum(msg_tokens[-keep_tail:])
+    droppable_tokens = msg_tokens[keep_head:-keep_tail]
+
+    marker_msg = _make_trimmed_marker_message(messages[0])
+    marker_tokens = get_token_count([marker_msg])
 
     # Build a set of tool_use IDs required by the tail (tool_results that need
     # their corresponding assistant tool_use message kept).
@@ -308,6 +318,8 @@ def _enforce_token_budget(
 
     # Drop from the front of droppable until within budget.
     dropped_count = 0
+    running_droppable_tokens = sum(droppable_tokens)
+
     while droppable:
         candidate = droppable[0]
         candidate_role = get_block_attr(candidate, "role")
@@ -326,11 +338,18 @@ def _enforce_token_budget(
             if msg_result_ids & tail_tool_use_ids:
                 break
 
+        dropped_token_val = droppable_tokens.pop(0)
         droppable.pop(0)
+        running_droppable_tokens -= dropped_token_val
         dropped_count += 1
 
-        test_messages = head + droppable + tail
-        test_tokens = get_token_count(test_messages, system, tools)
+        test_tokens = (
+            base_tokens
+            + head_tokens
+            + running_droppable_tokens
+            + tail_tokens
+            + marker_tokens
+        )
         if test_tokens <= max_context_tokens:
             break
 
@@ -341,7 +360,13 @@ def _enforce_token_budget(
     marker = _make_trimmed_marker_message(messages[0])
     trimmed = [*head, marker, *droppable, *tail]
 
-    new_tokens = get_token_count(trimmed, system, tools)
+    new_tokens = (
+        base_tokens
+        + head_tokens
+        + running_droppable_tokens
+        + tail_tokens
+        + marker_tokens
+    )
     logger.info(
         "CONTEXT_TRIM: dropped {} messages, tokens {} -> {} (budget={})",
         dropped_count,
