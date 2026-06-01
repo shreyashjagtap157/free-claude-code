@@ -288,6 +288,15 @@ class ProviderRegistry:
             self._providers[provider_id] = create_provider(provider_id, settings)
         return self._providers[provider_id]
 
+    async def evict(self, provider_id: str) -> None:
+        """Remove a provider from the cache and release its resources."""
+        provider = self._providers.pop(provider_id, None)
+        if provider is not None:
+            try:
+                await provider.cleanup()
+            except Exception:
+                logger.warning("provider evict cleanup failed: {}", provider_id)
+
     def cache_model_ids(self, provider_id: str, model_ids: Iterable[str]) -> None:
         """Store a provider model-list result for later instant API responses."""
         self.cache_model_infos(provider_id, model_infos_from_ids(model_ids))

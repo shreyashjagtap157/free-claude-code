@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from loguru import logger
 
-from config.provider_ids import SUPPORTED_PROVIDER_IDS
+from config.provider_catalog import SUPPORTED_PROVIDER_IDS
 from config.settings import Settings
 
 from .gateway_model_ids import decode_gateway_model_id

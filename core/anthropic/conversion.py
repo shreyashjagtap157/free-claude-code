@@ -3,12 +3,14 @@
 import json
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
 from .content import get_block_attr, get_block_type
 from .utils import set_if_not_none
+
+SystemPromptStrategy = Literal["as_message", "prepend_to_first_user"]
 
 
 class OpenAIConversionError(Exception):
@@ -170,6 +172,18 @@ class AnthropicToOpenAIConverter:
         result: list[dict[str, Any]] = []
         pending: _PendingAfterTools | None = None
 
+        tool_names: dict[str, str] = {}
+        for msg in messages:
+            if getattr(msg, "role", None) == "assistant" and isinstance(
+                getattr(msg, "content", None), list
+            ):
+                for block in msg.content:
+                    if get_block_type(block) == "tool_use":
+                        tid = get_block_attr(block, "id")
+                        tname = get_block_attr(block, "name")
+                        if tid and tname:
+                            tool_names[str(tid)] = str(tname)
+
         for msg in messages:
             role = msg.role
             content = msg.content
@@ -246,19 +260,21 @@ class AnthropicToOpenAIConverter:
                             pending = None
                             result.extend(
                                 AnthropicToOpenAIConverter._convert_user_message(
-                                    content
+                                    content, tool_names=tool_names
                                 )
                             )
                         else:
                             pieces = AnthropicToOpenAIConverter._convert_user_message_with_injection(
-                                content, pending
+                                content, pending, tool_names=tool_names
                             )
                             result.extend(pieces["messages"])
                             if pieces["cleared_pending"]:
                                 pending = None
                     else:
                         result.extend(
-                            AnthropicToOpenAIConverter._convert_user_message(content)
+                            AnthropicToOpenAIConverter._convert_user_message(
+                                content, tool_names=tool_names
+                            )
                         )
             else:
                 if role == "user" and pending is not None and pending.needs_deferred():
@@ -409,12 +425,16 @@ class AnthropicToOpenAIConverter:
 
     @staticmethod
     def _convert_user_message_with_injection(
-        content: list[Any], pending: _PendingAfterTools
+        content: list[Any],
+        pending: _PendingAfterTools,
+        tool_names: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Convert user list blocks, emitting deferred assistant after all tool results."""
         if not pending.needs_deferred() or not pending.remaining_tool_ids:
             return {
-                "messages": AnthropicToOpenAIConverter._convert_user_message(content),
+                "messages": AnthropicToOpenAIConverter._convert_user_message(
+                    content, tool_names=tool_names
+                ),
                 "cleared_pending": False,
             }
 
@@ -443,13 +463,16 @@ class AnthropicToOpenAIConverter:
                 serialized = _serialize_tool_result_content(tool_content)
                 tuid = get_block_attr(block, "tool_use_id")
                 tuid_s = str(tuid) if tuid is not None else ""
-                result.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tuid,
-                        "content": serialized if serialized else "",
-                    }
-                )
+
+                tool_msg = {
+                    "role": "tool",
+                    "tool_call_id": tuid,
+                    "content": serialized if serialized else "",
+                }
+                if tool_names and tuid_s in tool_names:
+                    tool_msg["name"] = tool_names[tuid_s]
+                result.append(tool_msg)
+
                 if tuid_s in pending.remaining_tool_ids:
                     pending.remaining_tool_ids.discard(tuid_s)
                 if not pending.remaining_tool_ids:
@@ -467,7 +490,9 @@ class AnthropicToOpenAIConverter:
         return {"messages": result, "cleared_pending": cleared}
 
     @staticmethod
-    def _convert_user_message(content: list[Any]) -> list[dict[str, Any]]:
+    def _convert_user_message(
+        content: list[Any], tool_names: dict[str, str] | None = None
+    ) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
         text_parts: list[str] = []
 
@@ -491,13 +516,17 @@ class AnthropicToOpenAIConverter:
                 flush_text()
                 tool_content = get_block_attr(block, "content", "")
                 serialized = _serialize_tool_result_content(tool_content)
-                result.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": get_block_attr(block, "tool_use_id"),
-                        "content": serialized if serialized else "",
-                    }
-                )
+                tuid = get_block_attr(block, "tool_use_id")
+                tuid_s = str(tuid) if tuid is not None else ""
+
+                tool_msg = {
+                    "role": "tool",
+                    "tool_call_id": tuid,
+                    "content": serialized if serialized else "",
+                }
+                if tool_names and tuid_s in tool_names:
+                    tool_msg["name"] = tool_names[tuid_s]
+                result.append(tool_msg)
 
         flush_text()
         return result
@@ -550,24 +579,84 @@ class AnthropicToOpenAIConverter:
         return None
 
 
+def _prepend_system_to_first_user(
+    messages: list[dict[str, Any]], system_text: str
+) -> None:
+    """Prepend ``system_text`` to the first user message in-place.
+
+    If the first message has role ``"user"`` and string content, the system text is
+    prepended with a double-newline separator. If the first message has role ``"user"``
+    with list content (multi-block), a text block is inserted at position 0 of that list.
+    Otherwise a fresh ``{"role": "user", "content": system_text}`` is inserted at 0.
+    """
+    if not messages:
+        messages.insert(0, {"role": "user", "content": system_text})
+        return
+    first = messages[0]
+    if first.get("role") == "user":
+        content = first.get("content")
+        if isinstance(content, str):
+            first["content"] = f"{system_text}\n\n{content}" if content else system_text
+            return
+        if isinstance(content, list):
+            content.insert(0, {"type": "text", "text": system_text})
+            return
+    messages.insert(0, {"role": "user", "content": system_text})
+
+
 def build_base_request_body(
     request_data: Any,
     *,
     default_max_tokens: int | None = None,
     reasoning_replay: ReasoningReplayMode = ReasoningReplayMode.THINK_TAGS,
+    system_prompt_strategy: SystemPromptStrategy = "as_message",
 ) -> dict[str, Any]:
-    """Build the common parts of an OpenAI-format request body."""
+    """Build the common parts of an OpenAI-format request body.
+
+    Parameters
+    ----------
+    system_prompt_strategy:
+        ``"as_message"`` — insert ``{"role": "system", …}`` at position 0 (default).
+        ``"prepend_to_first_user"`` — prepend system text to the first user message
+        (for providers that reject a ``"system"`` role in the messages array).
+    """
     _openai_reject_native_only_top_level_fields(request_data)
     messages = AnthropicToOpenAIConverter.convert_messages(
         request_data.messages,
         reasoning_replay=reasoning_replay,
     )
 
+    # Claude Code v2.1.159+ may send ``{"role": "system"}`` messages in the array
+    # instead of the top-level ``system`` parameter. Extract them here so they flow
+    # through the same ``system_prompt_strategy`` handling as the top-level field.
+    system_msg_text: str | None = None
+    remaining: list[dict[str, Any]] = []
+    for msg in messages:
+        if msg.get("role") == "system" and isinstance(msg.get("content"), str):
+            text = msg["content"].strip()
+            if text:
+                system_msg_text = (
+                    f"{system_msg_text}\n\n{text}"
+                    if system_msg_text is not None
+                    else text
+                )
+        else:
+            remaining.append(msg)
+    messages[:] = remaining
+
     system = getattr(request_data, "system", None)
     if system:
         system_msg = AnthropicToOpenAIConverter.convert_system_prompt(system)
         if system_msg:
-            messages.insert(0, system_msg)
+            if system_msg_text is not None:
+                system_msg["content"] = f"{system_msg['content']}\n\n{system_msg_text}"
+            else:
+                system_msg_text = system_msg["content"]
+    if system_msg_text is not None:
+        if system_prompt_strategy == "prepend_to_first_user":
+            _prepend_system_to_first_user(messages, system_msg_text)
+        else:
+            messages.insert(0, {"role": "system", "content": system_msg_text})
 
     body: dict[str, Any] = {"model": request_data.model, "messages": messages}
 

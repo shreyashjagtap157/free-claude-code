@@ -197,7 +197,6 @@ async def stream_web_server_tool_response(
             "type": "message_delta",
             "delta": {"stop_reason": "end_turn", "stop_sequence": None},
             "usage": {
-                "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
                 "server_tool_use": {usage_key: 1},
             },

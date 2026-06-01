@@ -122,7 +122,6 @@ class TestSSEBuilderMessageLifecycle:
         builder = SSEBuilder("msg_1", "model", input_tokens=3)
         sse = builder.message_delta("end_turn", None)
         data = _parse_sse(sse)
-        assert data["usage"]["input_tokens"] == 3
         assert data["usage"]["output_tokens"] == 0
 
     def test_message_delta_preserves_zero_output_tokens(self):

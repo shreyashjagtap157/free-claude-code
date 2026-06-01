@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from config.nim import NimSettings
-from config.provider_ids import SUPPORTED_PROVIDER_IDS
+from config.provider_catalog import SUPPORTED_PROVIDER_IDS
 from providers.deepseek import DeepSeekProvider
 from providers.exceptions import UnknownProviderTypeError
 from providers.fireworks import FireworksProvider

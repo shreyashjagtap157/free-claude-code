@@ -3,20 +3,31 @@
 import json
 from functools import lru_cache
 
-import tiktoken
 from loguru import logger
 
 from .content import get_block_attr
 
-ENCODER = tiktoken.get_encoding("cl100k_base")
+# Offline-safe: tiktoken is a dependency so the import always works, but
+# the BPE encoding file may not be cached on an isolated machine.  Fall
+# back to char-length (len//4) when the encoding cannot be loaded.
+try:
+    import tiktoken as _tik
+
+    _ENCODER = _tik.get_encoding("cl100k_base")
+except Exception:
+    _ENCODER = None
 
 _DISALLOWED_SPECIAL: tuple[str, ...] = ()
 
 
 @lru_cache(maxsize=1024)
 def _count_text_tokens(text: str) -> int:
-    """Cached token count (⚡ Bolt Optimization: 31-40)."""
-    return len(ENCODER.encode(text, disallowed_special=_DISALLOWED_SPECIAL))
+    """Cached token count, with fallback to char-length estimate."""
+    import tiktoken
+
+    if isinstance(_ENCODER, tiktoken.Encoding):
+        return len(_ENCODER.encode(text, disallowed_special=_DISALLOWED_SPECIAL))
+    return len(text) // 4 + 1
 
 
 def get_token_count(

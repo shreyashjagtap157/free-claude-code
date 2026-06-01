@@ -8,14 +8,16 @@ from unittest.mock import MagicMock
 import pytest
 
 from config.nim import NimSettings
-from core.anthropic import set_if_not_none
+from core.anthropic import (
+    clone_body_without_reasoning_content,
+    set_if_not_none,
+)
 from providers.nvidia_nim.request import (
     NIM_TOOL_ARGUMENT_ALIASES_KEY,
     _set_extra,
     body_without_nim_tool_argument_aliases,
     build_request_body,
     clone_body_without_chat_template,
-    clone_body_without_reasoning_content,
     nim_tool_argument_aliases_from_body,
 )
 

@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
+from config.provider_catalog import PROVIDER_CATALOG
 from config.settings import Settings
 from core.anthropic import (
     get_token_count,
@@ -38,7 +39,11 @@ TokenCounter = Callable[[list[Any], str | list[Any] | None, list[Any] | None], i
 ProviderGetter = Callable[[str], BaseProvider]
 
 # Providers that use ``/chat/completions`` + Anthropic-to-OpenAI conversion (not native Messages).
-_OPENAI_CHAT_UPSTREAM_IDS = frozenset({"nvidia_nim"})
+_OPENAI_CHAT_UPSTREAM_IDS = frozenset(
+    provider_id
+    for provider_id, desc in PROVIDER_CATALOG.items()
+    if desc.transport_type == "openai_chat"
+)
 
 
 def anthropic_sse_streaming_response(
@@ -97,11 +102,13 @@ class ClaudeProxyService:
         provider_getter: ProviderGetter,
         model_router: ModelRouter | None = None,
         token_counter: TokenCounter = get_token_count,
+        evict_provider: Callable[[str], None] | None = None,
     ):
         self._settings = settings
         self._provider_getter = provider_getter
         self._model_router = model_router or ModelRouter(settings)
         self._token_counter = token_counter
+        self._evict_provider = evict_provider
 
     def _apply_context_trimming(self, request_data: MessagesRequest) -> MessagesRequest:
         """Apply server-side context trimming for providers without prompt caching."""
@@ -177,10 +184,17 @@ class ClaudeProxyService:
                 effective_request = self._apply_context_trimming(routed.request)
 
             provider = self._provider_getter(routed.resolved.provider_id)
-            provider.preflight_stream(
-                effective_request,
-                thinking_enabled=routed.resolved.thinking_enabled,
-            )
+            try:
+                provider.preflight_stream(
+                    effective_request,
+                    thinking_enabled=routed.resolved.thinking_enabled,
+                )
+            except Exception:
+                # Evict the provider so a fresh one is created next request.
+                evict = self._evict_provider
+                if evict is not None:
+                    evict(routed.resolved.provider_id)
+                raise
 
             trace_event(
                 stage="routing",

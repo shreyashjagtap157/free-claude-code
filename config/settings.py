@@ -13,7 +13,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .constants import HTTP_CONNECT_TIMEOUT_DEFAULT
 from .nim import NimSettings
-from .provider_ids import SUPPORTED_PROVIDER_IDS
+from .provider_catalog import SUPPORTED_PROVIDER_IDS
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,28 +109,38 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     # ==================== OpenRouter Config ====================
-    open_router_api_key: str = Field(default="", validation_alias="OPENROUTER_API_KEY")
+    open_router_api_key: str = Field(
+        default="", validation_alias="OPENROUTER_API_KEY", repr=False
+    )
 
     # ==================== DeepSeek Config ====================
-    deepseek_api_key: str = Field(default="", validation_alias="DEEPSEEK_API_KEY")
+    deepseek_api_key: str = Field(
+        default="", validation_alias="DEEPSEEK_API_KEY", repr=False
+    )
 
     # ==================== Kimi Config ====================
-    kimi_api_key: str = Field(default="", validation_alias="KIMI_API_KEY")
+    kimi_api_key: str = Field(default="", validation_alias="KIMI_API_KEY", repr=False)
 
     # ==================== Wafer Config ====================
-    wafer_api_key: str = Field(default="", validation_alias="WAFER_API_KEY")
+    wafer_api_key: str = Field(default="", validation_alias="WAFER_API_KEY", repr=False)
 
     # ==================== Google AI Studio (Gemini) Config ====================
-    gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")
+    gemini_api_key: str = Field(
+        default="", validation_alias="GEMINI_API_KEY", repr=False
+    )
 
     # ==================== OpenCode Zen / OpenCode Go Config ====================
-    opencode_api_key: str = Field(default="", validation_alias="OPENCODE_API_KEY")
+    opencode_api_key: str = Field(
+        default="", validation_alias="OPENCODE_API_KEY", repr=False
+    )
 
     # ==================== Z.ai Config ====================
-    zai_api_key: str = Field(default="", validation_alias="ZAI_API_KEY")
+    zai_api_key: str = Field(default="", validation_alias="ZAI_API_KEY", repr=False)
 
     # ==================== Fireworks AI Config ====================
-    fireworks_api_key: str = Field(default="", validation_alias="FIREWORKS_API_KEY")
+    fireworks_api_key: str = Field(
+        default="", validation_alias="FIREWORKS_API_KEY", repr=False
+    )
 
     # ==================== Messaging Platform Selection ====================
     # Valid: "telegram" | "discord" | "none"
@@ -145,7 +155,7 @@ class Settings(BaseSettings):
     )
 
     # ==================== NVIDIA NIM Config ====================
-    nvidia_nim_api_key: str = ""
+    nvidia_nim_api_key: str = Field(default="", repr=False)
 
     # ==================== LM Studio Config ====================
     lm_studio_base_url: str = Field(
@@ -309,13 +319,13 @@ class Settings(BaseSettings):
     # NVIDIA NIM: "nvidia/parakeet-ctc-1.1b-asr", "openai/whisper-large-v3", etc.
     whisper_model: str = Field(default="base", validation_alias="WHISPER_MODEL")
     # Hugging Face token for faster model downloads (optional, for local Whisper)
-    hf_token: str = Field(default="", validation_alias="HF_TOKEN")
+    hf_token: str = Field(default="", validation_alias="HF_TOKEN", repr=False)
 
     # ==================== Bot Wrapper Config ====================
-    telegram_bot_token: str | None = None
+    telegram_bot_token: str | None = Field(default=None, repr=False)
     allowed_telegram_user_id: str | None = None
     discord_bot_token: str | None = Field(
-        default=None, validation_alias="DISCORD_BOT_TOKEN"
+        default=None, validation_alias="DISCORD_BOT_TOKEN", repr=False
     )
     allowed_discord_channels: str | None = Field(
         default=None, validation_alias="ALLOWED_DISCORD_CHANNELS"
@@ -329,12 +339,12 @@ class Settings(BaseSettings):
 
     # ==================== Server ====================
     host: str = "0.0.0.0"
-    port: int = 8082
+    port: int = Field(default=8082, validation_alias="FCC_PORT")
     log_file: str = "server.log"
     # Optional server API key to protect endpoints (Anthropic-style)
     # Set via env `ANTHROPIC_AUTH_TOKEN`. When empty, no auth is required.
     anthropic_auth_token: str = Field(
-        default="", validation_alias="ANTHROPIC_AUTH_TOKEN"
+        default="", validation_alias="ANTHROPIC_AUTH_TOKEN", repr=False
     )
 
     @model_validator(mode="before")

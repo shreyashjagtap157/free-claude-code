@@ -73,18 +73,8 @@ def _strip_chat_template_field(extra_body: dict[str, Any]) -> bool:
     return extra_body.pop("chat_template", None) is not None
 
 
-def _strip_message_reasoning_content(body: dict[str, Any]) -> bool:
-    removed = False
-    messages = body.get("messages")
-    if not isinstance(messages, list):
-        return False
-    for message in messages:
-        if (
-            isinstance(message, dict)
-            and message.pop("reasoning_content", None) is not None
-        ):
-            removed = True
-    return removed
+# _strip_message_reasoning_content is now imported from
+# core.anthropic.request_body_utils as strip_message_reasoning_content.
 
 
 def _sanitize_nim_schema_node(value: Any) -> tuple[bool, Any]:
@@ -337,21 +327,8 @@ def clone_body_without_chat_template(body: dict[str, Any]) -> dict[str, Any] | N
     return _clone_strip_extra_body(body, _strip_chat_template_field)
 
 
-def clone_body_without_reasoning_content(body: dict[str, Any]) -> dict[str, Any] | None:
-    """Clone a request body and strip assistant message ``reasoning_content`` fields."""
-    cloned_body = deepcopy(body)
-    if not _strip_message_reasoning_content(cloned_body):
-        return None
-    return cloned_body
-
-
-def clone_body_without_reasoning_effort(body: dict[str, Any]) -> dict[str, Any] | None:
-    """Clone a request body and strip the ``reasoning_effort`` field."""
-    if "reasoning_effort" not in body:
-        return None
-    cloned_body = deepcopy(body)
-    cloned_body.pop("reasoning_effort", None)
-    return cloned_body
+# clone_body_without_reasoning_content and clone_body_without_reasoning_effort
+# are imported from core.anthropic.request_body_utils at the top of this module.
 
 
 def build_request_body(
@@ -369,6 +346,7 @@ def build_request_body(
             reasoning_replay=ReasoningReplayMode.REASONING_CONTENT
             if thinking_enabled
             else ReasoningReplayMode.DISABLED,
+            system_prompt_strategy="prepend_to_first_user",
         )
     except OpenAIConversionError as exc:
         raise InvalidRequestError(str(exc)) from exc

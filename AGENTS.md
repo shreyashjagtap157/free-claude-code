@@ -8,6 +8,7 @@
 - Install Python 3.14 using `uv python install 3.14` if not already installed
 - Always use `uv run` to run files instead of the global `python` command.
 - Current uv ruff formatter is set to py314 which has supports multiple exception types without paranthesis (except TypeError, ValueError:)
+- After any code change, reinstall with `uv tool install --reinstall .` — first kill fcc-server processes (`Get-Process -Name "python*" | Where-Object { $_.CommandLine -match "fcc-server" } | Stop-Process -Force`) or all python processes if locks persist (`Get-Process -Name "python*" | Stop-Process -Force`).
 - Read `.env.example` for environment variables.
 - All CI checks must pass; failing checks block merge.
 - Add tests for new changes (including edge cases), then run `uv run pytest`.

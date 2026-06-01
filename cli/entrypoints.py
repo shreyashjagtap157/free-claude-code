@@ -141,10 +141,89 @@ def _preflight_proxy(proxy_root_url: str) -> str | None:
     return None
 
 
+def _allocate_dynamic_port(main_proxy_root_url: str) -> int:
+    """Request a dynamic port from the main fcc-server."""
+    import json
+
+    url = f"{main_proxy_root_url.rstrip('/')}/admin/api/ports/allocate"
+    request = Request(url, method="POST", data=b"{}")
+    request.add_header("Content-Type", "application/json")
+    try:
+        with urlopen(request, timeout=5.0) as response:
+            data = json.loads(response.read().decode("utf-8"))
+            return int(data["port"])
+    except Exception as exc:
+        print(
+            f"Failed to allocate dynamic port from main server at {main_proxy_root_url}: {exc}",
+            file=sys.stderr,
+        )
+        print(
+            "Please ensure the main fcc-server is running on the default port first.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from None
+
+
 def launch_claude(argv: Sequence[str] | None = None) -> None:
     """Launch Claude Code with Free Claude Code proxy environment variables."""
 
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+
+    # Extract --port override before forwarding remaining args to Claude CLI.
+    port_override: int | str | None = None
+    forwarded_args: list[str] = []
+    i = 0
+    while i < len(raw_args):
+        if raw_args[i] == "--port" and i + 1 < len(raw_args):
+            val = raw_args[i + 1]
+            if val.lower() == "auto":
+                port_override = "auto"
+            else:
+                try:
+                    port_override = int(val)
+                except ValueError:
+                    print(
+                        f"Invalid --port value: {val}",
+                        file=sys.stderr,
+                    )
+                    raise SystemExit(1) from None
+            i += 2
+            continue
+        if raw_args[i].startswith("--port="):
+            val = raw_args[i].split("=", 1)[1]
+            if val.lower() == "auto":
+                port_override = "auto"
+            else:
+                try:
+                    port_override = int(val)
+                except ValueError:
+                    print(
+                        f"Invalid --port value: {raw_args[i]}",
+                        file=sys.stderr,
+                    )
+                    raise SystemExit(1) from None
+            i += 1
+            continue
+        forwarded_args.append(raw_args[i])
+        i += 1
+
+    # Check environment variable override
+    env_port = os.environ.get("FCC_PORT")
+    if env_port and env_port.lower() == "auto" and port_override is None:
+        port_override = "auto"
+
     settings = get_settings()
+    if port_override is not None:
+        if port_override == "auto":
+            # Target the main server URL to allocate a port
+            main_url = local_proxy_root_url(settings)
+            allocated_port = _allocate_dynamic_port(main_url)
+            print(f"Auto-allocated dynamic port: {allocated_port}", file=sys.stderr)
+            settings.port = allocated_port
+        else:
+            # Override settings port for this fcc-claude session.
+            settings.port = int(port_override)
+
     proxy_root_url = local_proxy_root_url(settings)
     if error := _preflight_proxy(proxy_root_url):
         print(
@@ -152,9 +231,14 @@ def launch_claude(argv: Sequence[str] | None = None) -> None:
             file=sys.stderr,
         )
         print("Start it in another terminal with: fcc-server", file=sys.stderr)
+        if port_override is None:
+            print(
+                "Tip: Multiple instances can share one fcc-server. "
+                "Or use FCC_PORT=<port> to run separate servers.",
+                file=sys.stderr,
+            )
         raise SystemExit(1)
 
-    args = list(sys.argv[1:] if argv is None else argv)
     claude_command = shutil.which(settings.claude_cli_bin)
     if claude_command is None:
         print(
@@ -167,7 +251,7 @@ def launch_claude(argv: Sequence[str] | None = None) -> None:
         )
         raise SystemExit(127)
 
-    command = [claude_command, *args]
+    command = [claude_command, *forwarded_args]
     env = _claude_child_env(settings, os.environ)
     process: subprocess.Popen[bytes] | None = None
     try:

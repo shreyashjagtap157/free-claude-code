@@ -86,7 +86,7 @@ async function load() {
   await refreshLocalStatus();
   updateDirtyState();
   showMessage("");
-  setInterval(refreshStats, 3000);
+  setInterval(refreshStats, 30000);
 }
 
 function updateHeader(status) {
@@ -571,8 +571,8 @@ byId("applyButton").addEventListener("click", apply);
 byId("refreshLocal").addEventListener("click", refreshLocalStatus);
 byId("refreshCalls").addEventListener("click", refreshCalls);
 
-// Auto-refresh API calls every 3 seconds
-setInterval(refreshCalls, 3000);
+// Auto-refresh API calls every 30 seconds
+setInterval(refreshCalls, 30000);
 
 load().catch((error) => {
   byId("serverStatus").textContent = "Error";

@@ -2,7 +2,7 @@
 
 import time
 import traceback
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 from typing import Any
 
@@ -101,6 +101,8 @@ def create_app(*, lifespan_enabled: bool = True) -> FastAPI:
     if lifespan_enabled:
         app_kwargs["lifespan"] = lifespan
     app = FastAPI(**app_kwargs)
+    app.state.has_received_request = False
+    app.state.is_worker = False
     app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     # Pre-calculated security headers (Optimization: ⚡ 1-10)
@@ -146,6 +148,9 @@ def create_app(*, lifespan_enabled: bool = True) -> FastAPI:
         Starlette's 'No response returned' RuntimeError in complex middleware stacks.
         """
         start_time = time.perf_counter()
+        if request.url.path != "/health":
+            with suppress(AttributeError):
+                request.app.state.has_received_request = True
         claude_sid = extract_claude_session_id_from_headers(request.headers)
         runtime = getattr(request.app.state, "runtime", None)
         if isinstance(runtime, AppRuntime):

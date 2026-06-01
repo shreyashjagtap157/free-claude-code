@@ -152,9 +152,9 @@ async def test_build_request_body(provider_config):
 
     assert body["model"] == "test-model"
     assert body["temperature"] == 0.5
-    assert len(body["messages"]) == 2  # System + User
-    assert body["messages"][0]["role"] == "system"
-    assert body["messages"][0]["content"] == "System prompt"
+    assert len(body["messages"]) == 1  # System prepended to first user message
+    assert body["messages"][0]["role"] == "user"
+    assert "System prompt" in body["messages"][0]["content"]
 
     assert "extra_body" in body
     ctk = body["extra_body"]["chat_template_kwargs"]

@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import inspect
 import ipaddress
+import socket
+import threading
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
+import uvicorn
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import FileResponse
+from loguru import logger
 from pydantic import BaseModel, Field, model_validator
 
 from config.settings import Settings
@@ -29,6 +33,52 @@ from .admin_config import (
 from .admin_urls import local_admin_url
 
 router = APIRouter()
+
+# Track active dynamic worker ports
+ALLOCATED_PORTS: dict[int, threading.Thread] = {}
+
+
+def _find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        s.listen(1)
+        port: int = s.getsockname()[1]
+        return port
+
+
+def _run_worker_server(port: int) -> None:
+    from .app import create_app
+
+    app = create_app(lifespan_enabled=False)
+    app.state.is_worker = True
+    app.state.has_received_request = False
+
+    server_holder: dict[str, uvicorn.Server] = {}
+
+    def monitor() -> None:
+        import time
+
+        time.sleep(30)
+        if not getattr(app.state, "has_received_request", False):
+            logger.warning(
+                f"Worker on port {port} received no requests in 30 seconds. Shutting down."
+            )
+            if "server" in server_holder:
+                server_holder["server"].should_exit = True
+
+    threading.Thread(target=monitor, daemon=True).start()
+
+    config = uvicorn.Config(
+        app,
+        host="127.0.0.1",
+        port=port,
+        log_level="info",
+        access_log=False,
+    )
+    server = uvicorn.Server(config)
+    server_holder["server"] = server
+    server.run()
+
 
 STATIC_DIR = Path(__file__).resolve().parent / "admin_static"
 LOCAL_PROVIDER_PATHS = {
@@ -161,7 +211,9 @@ async def apply_admin_config(
     old_registry = getattr(request.app.state, "provider_registry", None)
     if isinstance(old_registry, ProviderRegistry):
         await old_registry.cleanup()
-    request.app.state.provider_registry = ProviderRegistry()
+    new_registry = ProviderRegistry()
+    new_registry.start_model_list_refresh(get_cached_settings())
+    request.app.state.provider_registry = new_registry
     request.app.state.admin_pending_fields = result["pending_fields"]
     return result
 
@@ -185,6 +237,11 @@ async def admin_status(request: Request):
     if isinstance(runtime, AppRuntime):
         stats = runtime.get_stats()
 
+    # Clean up dead threads
+    for p, t in list(ALLOCATED_PORTS.items()):
+        if not t.is_alive():
+            ALLOCATED_PORTS.pop(p, None)
+
     return {
         "status": "running",
         "host": settings.host,
@@ -195,7 +252,30 @@ async def admin_status(request: Request):
         "provider_status": provider_config_status(),
         "cached_models": cached_models,
         "stats": stats,
+        "allocated_ports": list(ALLOCATED_PORTS.keys()),
     }
+
+
+@router.post("/admin/api/ports/allocate")
+async def allocate_port(request: Request):
+    require_loopback_admin(request)
+
+    # Clean up dead threads first
+    for p, t in list(ALLOCATED_PORTS.items()):
+        if not t.is_alive():
+            ALLOCATED_PORTS.pop(p, None)
+
+    port = _find_free_port()
+    thread = threading.Thread(
+        target=_run_worker_server,
+        args=(port,),
+        daemon=True,
+    )
+    thread.start()
+    ALLOCATED_PORTS[port] = thread
+
+    logger.info(f"Allocated dynamic port {port} for second fcc-claude instance")
+    return {"port": port}
 
 
 @router.get("/admin/api/calls")

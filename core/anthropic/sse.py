@@ -210,7 +210,6 @@ class SSEBuilder:
         )
 
     def message_delta(self, stop_reason: str, output_tokens: int | None) -> str:
-        safe_in = _safe_usage_int(self.input_tokens)
         safe_out = output_tokens if isinstance(output_tokens, int) else 0
         return self._format_event(
             "message_delta",
@@ -218,7 +217,6 @@ class SSEBuilder:
                 "type": "message_delta",
                 "delta": {"stop_reason": stop_reason, "stop_sequence": None},
                 "usage": {
-                    "input_tokens": safe_in,
                     "output_tokens": safe_out,
                 },
             },

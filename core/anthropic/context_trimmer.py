@@ -15,7 +15,6 @@ reduces token counts by:
 from __future__ import annotations
 
 import json
-from copy import deepcopy
 from typing import Any
 
 from loguru import logger
@@ -264,6 +263,25 @@ def _make_trimmed_marker_message(msg_template: Any) -> Any:
     return {"role": "user", "content": _TRIMMED_MARKER}
 
 
+def _find_model_class(name: str) -> type[Any] | None:
+    """Recursively search for a Pydantic model class by name without static imports."""
+    try:
+        from pydantic import BaseModel
+    except ImportError:
+        return None
+
+    def recurse(cls: type[BaseModel]) -> type[BaseModel] | None:
+        if cls.__name__ == name:
+            return cls
+        for sub in cls.__subclasses__():
+            res = recurse(sub)
+            if res is not None:
+                return res
+        return None
+
+    return recurse(BaseModel)
+
+
 def _enforce_token_budget(
     messages: list[Any],
     system: Any,
@@ -292,7 +310,6 @@ def _enforce_token_budget(
     if len(messages) <= keep_head + keep_tail:
         return messages
 
-    head = messages[:keep_head]
     droppable = list(messages[keep_head:-keep_tail])
     tail = messages[-keep_tail:]
 
@@ -303,10 +320,9 @@ def _enforce_token_budget(
     marker_msg = _make_trimmed_marker_message(messages[0])
     marker_tokens = get_token_count([marker_msg])
 
-    # Build a set of tool_use IDs required by the tail (tool_results that need
-    # their corresponding assistant tool_use message kept).
+    # Build a set of all tool_use_ids referenced by tool_results in the droppable and tail messages.
     required_tool_use_ids: set[str] = set()
-    for msg in tail:
+    for msg in droppable + tail:
         required_tool_use_ids.update(_collect_tool_result_ids(msg))
 
     # Also: if an assistant message in the tail has tool_use, we need to keep
@@ -317,31 +333,38 @@ def _enforce_token_budget(
         tail_tool_use_ids.update(_collect_tool_use_ids(msg))
 
     # Drop from the front of droppable until within budget.
+    # To preserve strict role alternation (user -> assistant -> user),
+    # we always drop in pairs: one assistant and one user message.
     dropped_count = 0
     running_droppable_tokens = sum(droppable_tokens)
 
-    while droppable:
-        candidate = droppable[0]
-        candidate_role = get_block_attr(candidate, "role")
+    while len(droppable) >= 2:
+        candidate1 = droppable[0]
+        candidate2 = droppable[1]
 
-        # Check if this message has tool_use IDs required by the tail.
-        if candidate_role == "assistant":
-            msg_tool_ids = _collect_tool_use_ids(candidate)
-            if msg_tool_ids & required_tool_use_ids:
-                # Cannot drop: tail has tool_results that reference this.
-                break
+        # The tool results in candidate2 are being dropped. So they are not in the remaining kept messages.
+        msg_result_ids2 = _collect_tool_result_ids(candidate2)
+        remaining_required = required_tool_use_ids - msg_result_ids2
 
-        # Check if this is a user message with tool_results whose assistant
-        # tool_use is in the tail.
-        if candidate_role == "user":
-            msg_result_ids = _collect_tool_result_ids(candidate)
-            if msg_result_ids & tail_tool_use_ids:
-                break
+        # Check if the assistant message has tool_use IDs required by the remaining kept messages.
+        msg_tool_ids1 = _collect_tool_use_ids(candidate1)
+        if msg_tool_ids1 & remaining_required:
+            break
 
-        dropped_token_val = droppable_tokens.pop(0)
+        # Check if the user message has tool_results whose assistant tool_use is in the tail or remaining droppable.
+        if msg_result_ids2 & tail_tool_use_ids:
+            break
+
+        # Drop the pair (assistant, user)
+        val1 = droppable_tokens.pop(0)
+        val2 = droppable_tokens.pop(0)
         droppable.pop(0)
-        running_droppable_tokens -= dropped_token_val
-        dropped_count += 1
+        droppable.pop(0)
+        running_droppable_tokens -= val1 + val2
+        dropped_count += 2
+
+        # Update required_tool_use_ids permanently since we successfully dropped candidate2
+        required_tool_use_ids = remaining_required
 
         test_tokens = (
             base_tokens
@@ -356,9 +379,42 @@ def _enforce_token_budget(
     if dropped_count == 0:
         return messages
 
-    # Insert marker at the boundary.
-    marker = _make_trimmed_marker_message(messages[0])
-    trimmed = [*head, marker, *droppable, *tail]
+    # Prepend the trimmed history marker directly to the first remaining message's content
+    # (which is guaranteed to be an assistant message, preserving strict alternation).
+    first_remaining = droppable[0] if droppable else tail[0]
+    content = get_block_attr(first_remaining, "content")
+
+    if isinstance(content, str):
+        new_content = f"{_TRIMMED_MARKER}\n\n{content}" if content else _TRIMMED_MARKER
+    elif isinstance(content, list):
+        if isinstance(first_remaining, dict):
+            new_content = [{"type": "text", "text": f"{_TRIMMED_MARKER}\n\n"}, *content]
+        else:
+            ContentBlockTextCls = _find_model_class("ContentBlockText")
+            if ContentBlockTextCls is not None:
+                new_block = ContentBlockTextCls(
+                    type="text", text=f"{_TRIMMED_MARKER}\n\n"
+                )
+                new_content = [new_block, *content]
+            else:
+                new_content = [
+                    {"type": "text", "text": f"{_TRIMMED_MARKER}\n\n"},
+                    *content,
+                ]
+    else:
+        new_content = _TRIMMED_MARKER
+
+    if hasattr(first_remaining, "model_copy"):
+        modified_msg = first_remaining.model_copy(update={"content": new_content})
+    else:
+        modified_msg = {**first_remaining, "content": new_content}
+
+    if droppable:
+        droppable[0] = modified_msg
+    else:
+        tail[0] = modified_msg
+
+    trimmed = [messages[0], *droppable, *tail]
 
     new_tokens = (
         base_tokens
@@ -406,8 +462,10 @@ def trim_messages_for_context_budget(
     if not messages:
         return messages
 
-    # Deep copy to avoid mutating the caller's data.
-    trimmed = deepcopy(messages)
+    # Note: caller is responsible for providing a defensive copy if needed.
+    # All internal helpers create new objects via model_copy() rather than
+    # mutating in place, so we operate directly on the input list.
+    trimmed = messages
 
     # 1. Strip thinking blocks (always, for non-Anthropic providers).
     trimmed = _strip_thinking_blocks(trimmed)

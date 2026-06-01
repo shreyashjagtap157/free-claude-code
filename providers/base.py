@@ -111,6 +111,23 @@ class BaseProvider(ABC):
                 "{}_ERROR:{} {}: {}", tag, req_tag, type(error).__name__, error
             )
             return
+
+        # Always log error body/message for 400 errors — these indicate fixable
+        # request issues (e.g. unsupported fields) and do not contain sensitive
+        # user data.  This helps diagnose provider compatibility problems without
+        # requiring LOG_API_ERROR_TRACEBACKS=true.
+        if http_status == 400:
+            error_body = getattr(error, "body", None)
+            logger.error(
+                "{}_ERROR:{} exc_type={} http_status={} body={}",
+                tag,
+                req_tag,
+                type(error).__name__,
+                http_status,
+                error_body,
+            )
+            return
+
         logger.error(
             "{}_ERROR:{} exc_type={} http_status={}",
             tag,

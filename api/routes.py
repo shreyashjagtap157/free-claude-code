@@ -1,5 +1,7 @@
 """FastAPI route handlers."""
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from loguru import logger
 
@@ -64,12 +66,20 @@ def get_proxy_service(
     settings: Settings = Depends(get_settings),
 ) -> ClaudeProxyService:
     """Build the request service for route handlers."""
+    app = request.app
+
+    def _evict(provider_id: str) -> None:
+        reg = getattr(app.state, "provider_registry", None)
+        if reg is not None:
+            asyncio.ensure_future(reg.evict(provider_id))
+
     return ClaudeProxyService(
         settings,
         provider_getter=lambda provider_type: dependencies.resolve_provider(
-            provider_type, app=request.app, settings=settings
+            provider_type, app=app, settings=settings
         ),
         token_counter=get_token_count,
+        evict_provider=_evict,
     )
 
 

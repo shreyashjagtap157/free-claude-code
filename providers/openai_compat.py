@@ -22,6 +22,8 @@ from core.anthropic import (
     SSEBuilder,
     ThinkTagParser,
     append_request_id,
+    clone_body_without_reasoning_content,
+    clone_body_without_reasoning_effort,
     map_stop_reason,
 )
 from core.call_log import ApiCallRecord
@@ -129,7 +131,53 @@ class OpenAIChatTransport(BaseProvider):
         return iter(())
 
     def _get_retry_request_body(self, error: Exception, body: dict) -> dict | None:
-        """Return a modified request body for one retry, or None."""
+        """Retry once with a downgraded body when upstream OpenAI-compatible returns a 400 error."""
+        import openai
+
+        status_code = getattr(error, "status_code", None)
+        if not isinstance(error, openai.BadRequestError) and status_code != 400:
+            return None
+
+        error_text = str(error)
+        error_body = getattr(error, "body", None)
+        if error_body is not None:
+            error_text = f"{error_text} {json.dumps(error_body, default=str)}"
+        error_text = error_text.lower()
+
+        # Try to strip reasoning_effort first if mentioned, or as a general fallback
+        if "reasoning_effort" in error_text:
+            retry_body = clone_body_without_reasoning_effort(body)
+            if retry_body is not None:
+                logger.warning(
+                    f"{self._provider_name}_STREAM: retrying without reasoning_effort after 400 error"
+                )
+                return retry_body
+
+        # Try to strip reasoning_content next
+        if "reasoning_content" in error_text or "reasoning" in error_text:
+            retry_body = clone_body_without_reasoning_content(body)
+            if retry_body is not None:
+                logger.warning(
+                    f"{self._provider_name}_STREAM: retrying without reasoning_content after 400 error"
+                )
+                return retry_body
+
+        # Fallback catch-all for any 400 error: if the body has reasoning_content, strip it and try
+        retry_body = clone_body_without_reasoning_content(body)
+        if retry_body is not None:
+            logger.warning(
+                f"{self._provider_name}_STREAM: retrying without reasoning_content as a fallback after 400 error"
+            )
+            return retry_body
+
+        # Fallback catch-all for reasoning_effort
+        retry_body = clone_body_without_reasoning_effort(body)
+        if retry_body is not None:
+            logger.warning(
+                f"{self._provider_name}_STREAM: retrying without reasoning_effort as a fallback after 400 error"
+            )
+            return retry_body
+
         return None
 
     def _prepare_create_body(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -237,8 +285,8 @@ class OpenAIChatTransport(BaseProvider):
         tool_argument_alias_buffers: dict[int, str] | None = None,
     ) -> Iterator[str]:
         """Process a single tool call delta and yield SSE events."""
-        tc_index = tc.get("index", 0)
-        if tc_index < 0:
+        tc_index = tc.get("index")
+        if tc_index is None or tc_index < 0:
             tc_index = len(sse.blocks.tool_states)
 
         fn_delta = tc.get("function", {})
@@ -467,12 +515,14 @@ class OpenAIChatTransport(BaseProvider):
                 raise
             except Exception as e:
                 duration = time.monotonic() - start_time
+                error_body = getattr(e, "body", None)
                 logger.info(
-                    "API_CALL | {} | ERR  | model={} | duration={:.1f}s | {}",
+                    "API_CALL | {} | ERR  | model={} | duration={:.1f}s | {} | body={}",
                     tag,
                     model,
                     duration,
                     type(e).__name__,
+                    error_body if error_body is not None else "no-body",
                 )
                 push_call_log(
                     ApiCallRecord(
