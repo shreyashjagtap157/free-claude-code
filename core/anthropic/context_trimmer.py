@@ -329,8 +329,10 @@ def _enforce_token_budget(
     # its corresponding tool_result in tail (which it already is) but also
     # ensure we don't orphan it.
     tail_tool_use_ids: set[str] = set()
+    tail_tool_result_ids: set[str] = set()
     for msg in tail:
         tail_tool_use_ids.update(_collect_tool_use_ids(msg))
+        tail_tool_result_ids.update(_collect_tool_result_ids(msg))
 
     # Drop from the front of droppable until within budget.
     # To preserve strict role alternation (user -> assistant -> user),
@@ -353,6 +355,11 @@ def _enforce_token_budget(
 
         # Check if the user message has tool_results whose assistant tool_use is in the tail or remaining droppable.
         if msg_result_ids2 & tail_tool_use_ids:
+            break
+
+        # Reverse check: if the candidate assistant's tool_use IDs are referenced
+        # by tool_results in the tail, dropping this assistant would orphan them.
+        if msg_tool_ids1 & tail_tool_result_ids:
             break
 
         # Drop the pair (assistant, user)

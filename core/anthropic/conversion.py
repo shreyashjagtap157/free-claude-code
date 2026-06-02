@@ -174,21 +174,21 @@ class AnthropicToOpenAIConverter:
 
         tool_names: dict[str, str] = {}
         for msg in messages:
-            if getattr(msg, "role", None) == "assistant" and isinstance(
-                getattr(msg, "content", None), list
-            ):
-                for block in msg.content:
-                    if get_block_type(block) == "tool_use":
-                        tid = get_block_attr(block, "id")
-                        tname = get_block_attr(block, "name")
-                        if tid and tname:
-                            tool_names[str(tid)] = str(tname)
+            if get_block_attr(msg, "role") == "assistant":
+                msg_content = get_block_attr(msg, "content")
+                if isinstance(msg_content, list):
+                    for block in msg_content:
+                        if get_block_type(block) == "tool_use":
+                            tid = get_block_attr(block, "id")
+                            tname = get_block_attr(block, "name")
+                            if tid and tname:
+                                tool_names[str(tid)] = str(tname)
 
         for msg in messages:
-            role = msg.role
-            content = msg.content
+            role = get_block_attr(msg, "role")
+            content = get_block_attr(msg, "content")
             reasoning_content = _clean_reasoning_content(
-                getattr(msg, "reasoning_content", None)
+                get_block_attr(msg, "reasoning_content")
             )
 
             if role == "assistant" and isinstance(content, list):
@@ -468,9 +468,10 @@ class AnthropicToOpenAIConverter:
                     "role": "tool",
                     "tool_call_id": tuid,
                     "content": serialized if serialized else "",
+                    "name": tool_names[tuid_s]
+                    if tool_names and tuid_s in tool_names
+                    else "unknown_tool",
                 }
-                if tool_names and tuid_s in tool_names:
-                    tool_msg["name"] = tool_names[tuid_s]
                 result.append(tool_msg)
 
                 if tuid_s in pending.remaining_tool_ids:
@@ -523,9 +524,10 @@ class AnthropicToOpenAIConverter:
                     "role": "tool",
                     "tool_call_id": tuid,
                     "content": serialized if serialized else "",
+                    "name": tool_names[tuid_s]
+                    if tool_names and tuid_s in tool_names
+                    else "unknown_tool",
                 }
-                if tool_names and tuid_s in tool_names:
-                    tool_msg["name"] = tool_names[tuid_s]
                 result.append(tool_msg)
 
         flush_text()

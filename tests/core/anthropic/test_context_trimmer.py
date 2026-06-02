@@ -315,3 +315,80 @@ class TestFullPipeline:
         )
         # Original message unchanged.
         assert len(msgs[1].content) == original_content_len
+
+
+class TestToolOrphanPrevention:
+    """Verify that context trimming never orphans tool_result blocks."""
+
+    def test_trimmer_does_not_orphan_tool_results_in_tail(self):
+        """If the tail has a tool_result referencing an assistant's tool_use,
+        that assistant must not be dropped even under budget pressure.
+
+        Dropping it would produce a role:'tool' message without a matching
+        tool_call, causing Gemini's 'function_response.name cannot be empty'.
+        """
+        msgs: list[Message] = [_user("initial")]
+
+        # Pad with enough conversation to force trimming.
+        for i in range(10):
+            msgs.append(_assistant(_long_text(2000)))
+            msgs.append(_user(f"q{i}"))
+
+        # The assistant with tool_use that we must keep.
+        msgs.append(_assistant_tool_use("critical_t1", "Read", {"path": "x"}))
+        # This tool_result referencing the above will end up in the tail.
+        msgs.append(_user_tool_result("critical_t1", "file contents"))
+
+        result = _enforce_token_budget(msgs, None, None, max_context_tokens=3000)
+
+        # Verify the assistant with tool_use "critical_t1" was kept.
+        kept_tool_use_ids: set[str] = set()
+        kept_tool_result_ids: set[str] = set()
+        for msg in result:
+            content = msg.content if isinstance(msg.content, list) else []
+            for block in content:
+                if getattr(block, "type", None) == "tool_use":
+                    kept_tool_use_ids.add(block.id)
+                elif getattr(block, "type", None) == "tool_result":
+                    kept_tool_result_ids.add(block.tool_use_id)
+
+        # Every tool_result must have its matching tool_use present.
+        orphaned = kept_tool_result_ids - kept_tool_use_ids
+        assert not orphaned, (
+            f"Orphaned tool_result IDs (no matching tool_use): {orphaned}"
+        )
+
+    def test_trimmer_keeps_tool_pairs_in_middle_droppable(self):
+        """Tool_use/tool_result pairs in the droppable region are kept together."""
+        msgs: list[Message] = [_user("initial")]
+
+        # Filler before the tool pair.
+        for i in range(4):
+            msgs.append(_assistant(_long_text(2000)))
+            msgs.append(_user(f"q{i}"))
+
+        # Tool pair in the middle of droppable.
+        msgs.append(_assistant_tool_use("mid_t1", "Search", {"q": "x"}))
+        msgs.append(_user_tool_result("mid_t1", "result"))
+
+        # More filler after.
+        for i in range(4):
+            msgs.append(_assistant(_long_text(2000)))
+            msgs.append(_user(f"q_after_{i}"))
+
+        result = _enforce_token_budget(msgs, None, None, max_context_tokens=5000)
+
+        kept_tool_use_ids: set[str] = set()
+        kept_tool_result_ids: set[str] = set()
+        for msg in result:
+            content = msg.content if isinstance(msg.content, list) else []
+            for block in content:
+                if getattr(block, "type", None) == "tool_use":
+                    kept_tool_use_ids.add(block.id)
+                elif getattr(block, "type", None) == "tool_result":
+                    kept_tool_result_ids.add(block.tool_use_id)
+
+        orphaned = kept_tool_result_ids - kept_tool_use_ids
+        assert not orphaned, (
+            f"Orphaned tool_result IDs (no matching tool_use): {orphaned}"
+        )

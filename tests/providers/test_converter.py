@@ -156,6 +156,7 @@ def test_convert_user_message_tool_result_str():
         "role": "tool",
         "tool_call_id": "tool_123",
         "content": "Result data",
+        "name": "unknown_tool",
     }
 
 
@@ -191,7 +192,12 @@ def test_convert_user_message_mixed_text_and_tool_result():
     # Order is preserved: user text first, then tool result.
     assert len(result) == 2
     assert result[0] == {"role": "user", "content": "Here is the result:"}
-    assert result[1] == {"role": "tool", "tool_call_id": "tool_789", "content": "42"}
+    assert result[1] == {
+        "role": "tool",
+        "tool_call_id": "tool_789",
+        "content": "42",
+        "name": "unknown_tool",
+    }
 
 
 # --- Message Conversion Tests: Assistant ---
@@ -662,3 +668,91 @@ def test_convert_assistant_server_tool_blocks_raise(content) -> None:
     messages = [MockMessage("assistant", content)]
     with pytest.raises(OpenAIConversionError, match="server tool"):
         AnthropicToOpenAIConverter.convert_messages(messages)
+
+
+def test_convert_messages_with_raw_dictionaries() -> None:
+    """Verify that messages represented as raw dicts are correctly converted and tool names are populated."""
+    messages = [
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "tool_dict_123",
+                    "name": "check_balance",
+                    "input": {"account": "main"},
+                }
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "tool_dict_123",
+                    "content": "100.00 USD",
+                }
+            ],
+        },
+    ]
+    result = AnthropicToOpenAIConverter.convert_messages(messages)
+    assert len(result) == 2
+    assert result[0]["role"] == "assistant"
+    assert "tool_calls" in result[0]
+    assert result[0]["tool_calls"][0]["id"] == "tool_dict_123"
+    assert result[0]["tool_calls"][0]["function"]["name"] == "check_balance"
+
+    assert result[1]["role"] == "tool"
+    assert result[1]["tool_call_id"] == "tool_dict_123"
+    assert result[1]["content"] == "100.00 USD"
+    assert result[1]["name"] == "check_balance"
+
+
+def test_orphaned_tool_result_gets_fallback_name() -> None:
+    """A tool_result without a matching tool_use (e.g. after context trimming)
+    must still produce a role:'tool' message with a non-empty name.
+
+    Gemini's OpenAI-compatible gateway requires 'name' on all function_response
+    parts. Without this fallback, it returns 400 INVALID_ARGUMENT.
+    """
+    # Only the user message with tool_result — no assistant with tool_use.
+    messages = [
+        MockMessage(
+            "user",
+            [MockBlock(type="tool_result", tool_use_id="orphan_123", content="data")],
+        )
+    ]
+    result = AnthropicToOpenAIConverter.convert_messages(messages)
+    assert len(result) == 1
+    assert result[0]["role"] == "tool"
+    assert result[0]["tool_call_id"] == "orphan_123"
+    assert result[0]["name"] == "unknown_tool"
+    assert result[0]["content"] == "data"
+
+
+def test_tool_result_always_has_name_field() -> None:
+    """Every converted tool message must have a 'name' field, whether matched or not."""
+    messages = [
+        # Assistant with one tool_use
+        MockMessage(
+            "assistant",
+            [MockBlock(type="tool_use", id="t1", name="Read", input={})],
+        ),
+        # User with two tool_results: one matched, one orphaned
+        MockMessage(
+            "user",
+            [
+                MockBlock(type="tool_result", tool_use_id="t1", content="matched"),
+                MockBlock(
+                    type="tool_result", tool_use_id="t_orphan", content="orphaned"
+                ),
+            ],
+        ),
+    ]
+    result = AnthropicToOpenAIConverter.convert_messages(messages)
+    # assistant + 2 tool messages
+    assert len(result) == 3
+    assert result[1]["role"] == "tool"
+    assert result[1]["name"] == "Read"  # matched
+    assert result[2]["role"] == "tool"
+    assert result[2]["name"] == "unknown_tool"  # orphaned fallback
