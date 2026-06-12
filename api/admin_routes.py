@@ -304,6 +304,16 @@ async def _check_local_provider(
             "base_url": base_url,
         }
 
+    parsed = urlsplit(clean_url)
+    if parsed.scheme not in ("http", "https"):
+        return {
+            "provider_id": provider_id,
+            "status": "offline",
+            "label": "Invalid Scheme",
+            "base_url": base_url,
+            "error_type": "InvalidSchemeError",
+        }
+
     url = f"{clean_url}{path}"
     try:
         async with httpx.AsyncClient(timeout=1.5) as client:
