@@ -11,7 +11,7 @@ import httpx
 import openai
 from loguru import logger
 
-from core.rate_limit import StrictSlidingWindowLimiter
+from core.rate_limit import FixedSpacingLimiter
 from core.trace import trace_event
 
 T = TypeVar("T")
@@ -81,7 +81,7 @@ class GlobalRateLimiter:
         self._rate_limit = rate_limit
         self._rate_window = float(rate_window)
         self._max_concurrency = max_concurrency
-        self._proactive_limiter = StrictSlidingWindowLimiter(
+        self._proactive_limiter = FixedSpacingLimiter(
             self._rate_limit, self._rate_window
         )
         self._blocked_until: float = 0

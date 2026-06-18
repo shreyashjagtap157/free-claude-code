@@ -16,6 +16,7 @@ from starlette.types import Receive, Scope, Send
 
 from config.logging_config import configure_logging
 from config.settings import get_settings
+from core.cache import PromptCache
 from core.rate_limit import StrictSlidingWindowLimiter
 from core.trace import extract_claude_session_id_from_headers, trace_event
 from providers.exceptions import ProviderError
@@ -87,8 +88,19 @@ class GracefulLifespanApp:
                 return
 
 
-def create_app(*, lifespan_enabled: bool = True) -> FastAPI:
-    """Create and configure the FastAPI application."""
+def create_app(
+    *, lifespan_enabled: bool = True, cache: PromptCache | bool | None = None
+) -> FastAPI:
+    """Create and configure the FastAPI application.
+
+    Parameters
+    ----------
+    cache:
+        ``True`` or ``None`` (default) — create cache from ``settings`` when
+        *enable_cache* is ``True``.
+        ``False`` — disable cache entirely (used in tests).
+        A :class:`PromptCache` instance — use as-is.
+    """
     settings = get_settings()
     configure_logging(
         settings.log_file, verbose_third_party=settings.log_raw_api_payloads
@@ -103,6 +115,20 @@ def create_app(*, lifespan_enabled: bool = True) -> FastAPI:
     app = FastAPI(**app_kwargs)
     app.state.has_received_request = False
     app.state.is_worker = False
+
+    # Enterprise prompt response cache (global singleton, survives across requests).
+    if cache is False:
+        app.state.cache = None
+    elif isinstance(cache, PromptCache):
+        app.state.cache = cache
+    elif settings.enable_cache:
+        app.state.cache = PromptCache(
+            max_entries=settings.cache_max_entries,
+            ttl_seconds=settings.cache_ttl_seconds,
+        )
+    else:
+        app.state.cache = None
+
     app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     # Pre-calculated security headers (Optimization: ⚡ 1-10)

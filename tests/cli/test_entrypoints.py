@@ -131,7 +131,7 @@ def test_serve_supervisor_restarts_when_app_requests_restart() -> None:
             self.should_exit = False
             servers.append(self)
 
-        def run(self):
+        async def serve(self):
             if len(servers) == 1:
                 self.config.app.app.state.admin_restart_callback()
                 assert self.should_exit is True

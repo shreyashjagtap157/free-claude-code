@@ -191,6 +191,8 @@ def _truncate_tool_results(
                             block.model_copy(update={"content": new_raw})
                         )
                     elif isinstance(block, dict):
+                        # For Gemini/OpenAI compatibility, tool_result content
+                        # must be an array of parts if it was originally one.
                         new_content.append({**block, "content": new_raw})
                     else:
                         new_content.append(block)
@@ -221,6 +223,117 @@ def _truncate_tool_results(
 # ---------------------------------------------------------------------------
 # 3.  Drop oldest turns to meet token budget
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# 3b. Sanitize orphaned tool blocks after trimming
+# ---------------------------------------------------------------------------
+
+
+def _collect_all_tool_use_ids(messages: list[Any]) -> set[str]:
+    """Return every ``tool_use`` ID present across all assistant messages."""
+    ids: set[str] = set()
+    for msg in messages:
+        ids.update(_collect_tool_use_ids(msg))
+    return ids
+
+
+def _sanitize_orphaned_tool_blocks(messages: list[Any]) -> list[Any]:
+    """Replace orphaned ``tool_result`` blocks with text summaries.
+
+    After context trimming drops messages, a ``tool_result`` may survive
+    whose corresponding ``tool_use`` (assistant) was dropped.  Gemini's
+    OpenAI compatibility layer resolves ``function_response.name`` by
+    matching ``tool_call_id`` to a prior ``function_call``.  When the
+    function call is missing, the name becomes empty and the request is
+    rejected with a 400.
+
+    This function converts such orphaned ``tool_result`` blocks to plain
+    ``text`` blocks so the conversation remains valid.
+    """
+    all_tool_use_ids = _collect_all_tool_use_ids(messages)
+    if not all_tool_use_ids and not any(_collect_tool_result_ids(m) for m in messages):
+        return messages
+
+    result: list[Any] = []
+    orphan_count = 0
+
+    for msg in messages:
+        content = get_block_attr(msg, "content")
+        if not isinstance(content, list):
+            result.append(msg)
+            continue
+
+        new_blocks: list[Any] = []
+        changed = False
+        for block in content:
+            if get_block_type(block) == "tool_result":
+                tuid = get_block_attr(block, "tool_use_id")
+                if tuid and str(tuid) in all_tool_use_ids:
+                    new_blocks.append(block)
+                else:
+                    # Orphaned tool_result: convert to text summary.
+                    changed = True
+                    orphan_count += 1
+                    raw = get_block_attr(block, "content", "")
+                    summary = _serialize_tool_result_content_for_text(raw)
+                    if hasattr(block, "model_copy"):
+                        model_cls = _find_model_class("ContentBlockText")
+                        if model_cls is not None:
+                            new_blocks.append(
+                                model_cls(
+                                    type="text",
+                                    text=f"[Previous tool result (trimmed context)]: {summary}",
+                                )
+                            )
+                        else:
+                            new_blocks.append(
+                                {
+                                    "type": "text",
+                                    "text": f"[Previous tool result (trimmed context)]: {summary}",
+                                }
+                            )
+                    else:
+                        new_blocks.append(
+                            {
+                                "type": "text",
+                                "text": f"[Previous tool result (trimmed context)]: {summary}",
+                            }
+                        )
+            else:
+                new_blocks.append(block)
+
+        if changed:
+            if hasattr(msg, "model_copy"):
+                result.append(msg.model_copy(update={"content": new_blocks or ""}))
+            elif isinstance(msg, dict):
+                result.append({**msg, "content": new_blocks or ""})
+            else:
+                result.append(msg)
+        else:
+            result.append(msg)
+
+    if orphan_count:
+        logger.info(
+            "CONTEXT_TRIM: sanitized {} orphaned tool_result block(s)",
+            orphan_count,
+        )
+    return result
+
+
+def _serialize_tool_result_content_for_text(content: Any) -> str:
+    """Best-effort text summary of a tool_result content block."""
+    if isinstance(content, str):
+        return content[:200] + "..." if len(content) > 200 else content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                parts.append(str(item.get("text", ""))[:200])
+            elif hasattr(item, "text"):
+                parts.append(str(getattr(item, "text", ""))[:200])
+        return " ".join(parts)[:300] if parts else "(tool output)"
+    return "(tool output)"
 
 
 def _collect_tool_use_ids(msg: Any) -> set[str]:
@@ -437,7 +550,7 @@ def _enforce_token_budget(
         new_tokens,
         max_context_tokens,
     )
-    return trimmed
+    return _sanitize_orphaned_tool_blocks(trimmed)
 
 
 # ---------------------------------------------------------------------------
@@ -460,6 +573,7 @@ def trim_messages_for_context_budget(
     1. Strip ``thinking`` / ``redacted_thinking`` blocks from assistant messages.
     2. Truncate oversized ``tool_result`` content blocks.
     3. Drop oldest conversation turns to meet ``max_context_tokens`` budget.
+    4. Sanitize orphaned ``tool_result`` blocks after message dropping.
 
     When ``max_context_tokens`` is 0 (disabled), only steps 1-2 run
     (step 2 only if ``max_tool_result_tokens > 0``).
@@ -469,9 +583,6 @@ def trim_messages_for_context_budget(
     if not messages:
         return messages
 
-    # Note: caller is responsible for providing a defensive copy if needed.
-    # All internal helpers create new objects via model_copy() rather than
-    # mutating in place, so we operate directly on the input list.
     trimmed = messages
 
     # 1. Strip thinking blocks (always, for non-Anthropic providers).
@@ -484,5 +595,8 @@ def trim_messages_for_context_budget(
     # 3. Enforce token budget.
     if max_context_tokens > 0:
         trimmed = _enforce_token_budget(trimmed, system, tools, max_context_tokens)
+
+    # 4. Sanitize orphaned tool results (prevents provider 400/500 errors).
+    trimmed = _sanitize_orphaned_tool_blocks(trimmed)
 
     return trimmed

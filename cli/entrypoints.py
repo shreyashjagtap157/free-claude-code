@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import subprocess
@@ -41,6 +42,24 @@ def _load_env_template() -> str:
         return source_template.read_text(encoding="utf-8")
 
     raise FileNotFoundError("Could not find bundled or source .env.example template.")
+
+
+def _suppress_proactor_connection_reset(loop: asyncio.AbstractEventLoop) -> None:
+    """Suppress benign ConnectionResetError from Windows proactor cleanup."""
+    orig_handler = loop.get_exception_handler()
+
+    def handler(_loop: asyncio.AbstractEventLoop, context: dict) -> None:
+        exc = context.get("exception")
+        if isinstance(exc, ConnectionResetError) and "shutdown" in str(
+            context.get("message", "")
+        ):
+            return
+        if orig_handler:
+            orig_handler(_loop, context)
+        else:
+            _loop.default_exception_handler(context)
+
+    loop.set_exception_handler(handler)
 
 
 def serve() -> None:
@@ -83,7 +102,13 @@ def _run_supervised_server(settings: Settings) -> bool:
     )
     server = uvicorn.Server(config)
     server_holder["server"] = server
-    server.run()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    _suppress_proactor_connection_reset(loop)
+    try:
+        loop.run_until_complete(server.serve())
+    finally:
+        loop.close()
     return restart_requested
 
 

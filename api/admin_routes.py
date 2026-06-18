@@ -284,6 +284,24 @@ async def get_api_calls(request: Request):
     return {"calls": recent_calls()}
 
 
+@router.get("/admin/api/cache")
+async def cache_status(request: Request):
+    require_loopback_admin(request)
+    cache = getattr(request.app.state, "cache", None)
+    if cache is None:
+        return {"enabled": False}
+    return {"enabled": True, **cache.stats()}
+
+
+@router.post("/admin/api/cache/clear")
+async def clear_cache(request: Request):
+    require_loopback_admin(request)
+    cache = getattr(request.app.state, "cache", None)
+    if cache is not None:
+        cache.clear()
+    return {"ok": True}
+
+
 @router.get("/admin/api/providers/local-status")
 async def local_provider_status(request: Request):
     require_loopback_admin(request)

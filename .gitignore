@@ -8,7 +8,10 @@ __pycache__
 agent_workspace
 .env
 server.log
+server.*.log
 debug-*.log
+.letta/
+.pytest-tmp/
 .coverage
 llama_cache
 .smoke-results

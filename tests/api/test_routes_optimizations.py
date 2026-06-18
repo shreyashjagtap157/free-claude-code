@@ -7,7 +7,7 @@ from api.app import create_app
 from api.dependencies import get_settings
 from config.settings import Settings
 
-app = create_app()
+app = create_app(cache=None)
 
 
 @pytest.fixture

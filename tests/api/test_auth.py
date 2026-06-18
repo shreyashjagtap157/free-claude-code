@@ -6,7 +6,7 @@ from api.app import create_app
 from api.dependencies import get_settings
 from config.settings import Settings
 
-app = create_app()
+app = create_app(cache=None)
 
 
 def test_anthropic_auth_token_required_and_accepts_x_api_key():

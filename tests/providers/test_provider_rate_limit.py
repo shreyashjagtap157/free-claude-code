@@ -152,14 +152,15 @@ class TestProviderRateLimiter:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_proactive_strict_rolling_window(self):
+    async def test_proactive_fixed_spacing(self):
         """
-        Proactive limiter should enforce a strict rolling window:
-        for any i, t[i+rate_limit] - t[i] >= rate_window (within tolerance).
+        Proactive limiter should enforce fixed inter-request spacing:
+        each acquire waits at least ``rate_window / rate_limit`` seconds
+        after the previous one.
         """
         GlobalRateLimiter.reset_instance()
         rate_limit = 2
-        rate_window = 0.5
+        rate_window = 0.5  # → 0.25s between requests
         limiter = GlobalRateLimiter.get_instance(
             rate_limit=rate_limit, rate_window=rate_window
         )
@@ -170,17 +171,18 @@ class TestProviderRateLimiter:
             await limiter.wait_if_blocked()
             acquired.append(time.monotonic())
 
-        # Trigger concurrency; without strict rolling windows, this can burst.
+        # 5 concurrent acquires → first passes immediately, rest are spaced.
         await asyncio.gather(*(acquire() for _ in range(5)))
 
         acquired.sort()
         assert len(acquired) == 5
 
         tolerance = 0.05
-        for i in range(len(acquired) - rate_limit):
-            assert acquired[i + rate_limit] - acquired[i] >= rate_window - tolerance, (
-                f"Rolling window violated at i={i}: "
-                f"dt={acquired[i + rate_limit] - acquired[i]:.3f}s"
+        for i in range(1, len(acquired)):
+            gap = acquired[i] - acquired[i - 1]
+            expected = rate_window / rate_limit  # 0.25s
+            assert gap >= expected - tolerance, (
+                f"Spacing violated at i={i}: gap={gap:.3f}s, expected≈{expected:.3f}s"
             )
 
     @pytest.mark.asyncio

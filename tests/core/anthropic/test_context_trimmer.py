@@ -14,6 +14,7 @@ from api.models.anthropic import (
 from core.anthropic.context_trimmer import (
     _TRIMMED_MARKER,
     _enforce_token_budget,
+    _sanitize_orphaned_tool_blocks,
     _strip_thinking_blocks,
     _truncate_tool_results,
     trim_messages_for_context_budget,
@@ -391,4 +392,132 @@ class TestToolOrphanPrevention:
         orphaned = kept_tool_result_ids - kept_tool_use_ids
         assert not orphaned, (
             f"Orphaned tool_result IDs (no matching tool_use): {orphaned}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 9. Orphaned tool_result sanitization (Gemini function_response.name fix)
+# ---------------------------------------------------------------------------
+
+
+class TestSanitizeOrphanedToolBlocks:
+    """Verify that _sanitize_orphaned_tool_blocks converts orphaned
+    tool_result blocks into text, preventing Gemini's
+    'function_response.name: Name cannot be empty' error.
+    """
+
+    def test_orphaned_tool_result_converted_to_text(self):
+        """A tool_result with no matching tool_use should become a text block."""
+        msgs: list[Message] = [
+            _user("hello"),
+            # This user msg has a tool_result referencing a tool_use
+            # that doesn't exist in any assistant message.
+            _user_tool_result("orphan_id", "some file contents"),
+            _assistant("response"),
+        ]
+
+        result = _sanitize_orphaned_tool_blocks(msgs)
+
+        # The orphaned tool_result should be converted to text.
+        assert len(result) == 3
+        user_msg = result[1]
+        assert isinstance(user_msg.content, list)
+        assert len(user_msg.content) == 1
+        block = user_msg.content[0]
+        assert block.type == "text"
+        assert "Previous tool result" in block.text
+        assert "some file contents" in block.text
+
+    def test_matched_tool_result_kept(self):
+        """A tool_result with a matching tool_use should be kept as-is."""
+        msgs: list[Message] = [
+            _user("start"),
+            _assistant_tool_use("t1", "Read", {"path": "file.py"}),
+            _user_tool_result("t1", "file contents here"),
+        ]
+
+        result = _sanitize_orphaned_tool_blocks(msgs)
+
+        # Nothing should change: tool_result references existing tool_use.
+        assert len(result) == 3
+        user_msg = result[2]
+        assert isinstance(user_msg.content, list)
+        assert user_msg.content[0].type == "tool_result"
+        assert user_msg.content[0].tool_use_id == "t1"
+
+    def test_mixed_orphaned_and_matched(self):
+        """User message with both orphaned and matched tool_results."""
+        msgs: list[Message] = [
+            _user("start"),
+            _assistant_tool_use("t1", "Read", {"path": "a.py"}),
+            Message(
+                role="user",
+                content=[
+                    ContentBlockToolResult(
+                        type="tool_result", tool_use_id="t1", content="ok"
+                    ),
+                    ContentBlockToolResult(
+                        type="tool_result",
+                        tool_use_id="orphan_t2",
+                        content="orphan result",
+                    ),
+                ],
+            ),
+        ]
+
+        result = _sanitize_orphaned_tool_blocks(msgs)
+
+        user_msg = result[2]
+        assert isinstance(user_msg.content, list)
+        assert len(user_msg.content) == 2
+        # First block: matched tool_result, kept as-is.
+        assert user_msg.content[0].type == "tool_result"
+        assert user_msg.content[0].tool_use_id == "t1"
+        # Second block: orphaned, converted to text.
+        assert user_msg.content[1].type == "text"
+        assert "Previous tool result" in user_msg.content[1].text
+
+    def test_no_tool_blocks_returns_unchanged(self):
+        """No tool_use or tool_result → no changes."""
+        msgs: list[Message] = [_user("hello"), _assistant("hi")]
+        result = _sanitize_orphaned_tool_blocks(msgs)
+        assert result is msgs  # identity — fast path
+
+    def test_full_pipeline_never_orphans_gemini(self):
+        """End-to-end: after trimming, no tool_result references a missing tool_use.
+
+        This reproduces the Gemini 'function_response.name cannot be empty' scenario.
+        """
+        msgs: list[Message] = [_user("initial")]
+
+        # Build a long conversation with tool interactions.
+        for i in range(10):
+            msgs.append(_assistant_tool_use(f"t{i}", "Read", {"path": f"file{i}.py"}))
+            msgs.append(_user_tool_result(f"t{i}", _long_text(3000)))
+
+        # Tail messages.
+        msgs.append(_assistant("final summary"))
+        msgs.append(_user("next question"))
+
+        result = trim_messages_for_context_budget(
+            msgs,
+            max_context_tokens=5000,
+            max_tool_result_tokens=500,
+        )
+
+        # Collect surviving tool_use and tool_result IDs.
+        kept_tool_use_ids: set[str] = set()
+        kept_tool_result_ids: set[str] = set()
+        for msg in result:
+            content = msg.content if isinstance(msg.content, list) else []
+            for block in content:
+                if getattr(block, "type", None) == "tool_use":
+                    kept_tool_use_ids.add(block.id)
+                elif getattr(block, "type", None) == "tool_result":
+                    kept_tool_result_ids.add(block.tool_use_id)
+
+        orphaned = kept_tool_result_ids - kept_tool_use_ids
+        assert not orphaned, (
+            f"Orphaned tool_result IDs would cause Gemini "
+            f"'function_response.name cannot be empty': {orphaned}"
         )

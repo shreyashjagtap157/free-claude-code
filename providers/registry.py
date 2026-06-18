@@ -176,8 +176,8 @@ def build_provider_config(
     return ProviderConfig(
         api_key=credential,
         base_url=base_url or descriptor.default_base_url,
-        rate_limit=settings.provider_rate_limit,
-        rate_window=settings.provider_rate_window,
+        rate_limit=descriptor.rate_limit or settings.provider_rate_limit,
+        rate_window=descriptor.rate_window or settings.provider_rate_window,
         max_concurrency=settings.provider_max_concurrency,
         http_read_timeout=settings.http_read_timeout,
         http_write_timeout=settings.http_write_timeout,

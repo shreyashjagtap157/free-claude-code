@@ -12,6 +12,10 @@ from loguru import logger
 from core.trace import trace_event
 
 from .process_registry import kill_pid_tree_best_effort, register_pid, unregister_pid
+from .renderer import SovereignRenderer
+
+# Cap stderr capture so a runaway child cannot exhaust memory; pipe is still drained.
+_MAX_STDERR_CAPTURE_BYTES = 256 * 1024
 
 # Cap stderr capture so a runaway child cannot exhaust memory; pipe is still drained.
 _MAX_STDERR_CAPTURE_BYTES = 256 * 1024
@@ -93,26 +97,27 @@ class CLISession:
         return self._is_busy
 
     async def start_task(
-        self, prompt: str, session_id: str | None = None, fork_session: bool = False
+        self,
+        prompt: str,
+        session_id: str | None = None,
+        fork_session: bool = False,
+        renderer: SovereignRenderer | None = None,
+        metrics_provider: Any | None = None,
     ) -> AsyncGenerator[dict]:
         """
         Start a new task or continue an existing session.
-
-        Args:
-            prompt: The user's message/prompt
-            session_id: Optional session ID to resume
-
-        Yields:
-            Event dictionaries from the CLI
         """
         if len(prompt) > 120_000:
             logger.warning("Prompt too long ({} chars), truncating", len(prompt))
             prompt = prompt[:120_000]
 
+        if renderer:
+            renderer.start_timer()
+
         async with self._cli_lock:
             self._is_busy = True
 
-            # Efficient env creation (⚡ Bolt Optimization: 21-30)
+            # Efficient env creation (? Bolt Optimization: 21-30)
             env = dict(os.environ)
             env.update(
                 {
@@ -239,8 +244,6 @@ class CLISession:
                                         session_id_extracted = True
                                     yield event
                 except asyncio.CancelledError:
-                    # Cancelling the handler task should not leave a Claude CLI
-                    # subprocess running in the background.
                     await asyncio.shield(self.stop())
                     raise
                 finally:
@@ -248,38 +251,42 @@ class CLISession:
                     if stderr_task is not None:
                         stderr_bytes = await stderr_task
 
-                stderr_text = None
-                if stderr_bytes:
-                    stderr_text = stderr_bytes.decode("utf-8", errors="replace").strip()
-                    if stderr_text:
-                        if self._log_raw_cli_diagnostics:
-                            logger.error("Claude CLI stderr: {}", stderr_text)
-                        else:
-                            logger.error(
-                                "Claude CLI stderr: bytes={} text_chars={}",
-                                len(stderr_bytes),
-                                len(stderr_text),
-                            )
-                        logger.info("CLI_SESSION: Yielding error event from stderr")
-                        yield {"type": "error", "error": {"message": stderr_text}}
+                    stderr_text = None
+                    if stderr_bytes:
+                        stderr_text = stderr_bytes.decode(
+                            "utf-8", errors="replace"
+                        ).strip()
+                        if stderr_text:
+                            if self._log_raw_cli_diagnostics:
+                                logger.error("Claude CLI stderr: {}", stderr_text)
+                            else:
+                                logger.error(
+                                    "Claude CLI stderr: bytes={} text_chars={}",
+                                    len(stderr_bytes),
+                                    len(stderr_text),
+                                )
+                            logger.info("CLI_SESSION: Yielding error event from stderr")
+                            yield {"type": "error", "error": {"message": stderr_text}}
 
-                return_code = await self.process.wait()
-                logger.info(
-                    f"Claude CLI exited with code {return_code}, stderr_present={bool(stderr_text)}"
-                )
-                if return_code != 0 and not stderr_text:
-                    logger.warning(
-                        f"CLI_SESSION: Process exited with code {return_code} but no stderr captured"
+                    return_code = await self.process.wait()
+                    logger.info(
+                        f"Claude CLI exited with code {return_code}, stderr_present={bool(stderr_text)}"
                     )
-                yield {
-                    "type": "exit",
-                    "code": return_code,
-                    "stderr": stderr_text,
-                }
+                    if return_code != 0 and not stderr_text:
+                        logger.warning(
+                            f"CLI_SESSION: Process exited with code {return_code} but no stderr captured"
+                        )
+                    yield {
+                        "type": "exit",
+                        "code": return_code,
+                        "stderr": stderr_text,
+                    }
             finally:
                 self._is_busy = False
                 if self.process and self.process.pid:
                     unregister_pid(self.process.pid)
+                if renderer:
+                    renderer.stop_timer()
 
     async def _handle_line_gen(
         self, line_str: str, session_id_extracted: bool

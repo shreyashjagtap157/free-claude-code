@@ -37,6 +37,7 @@ class ProviderDescriptor:
     provider_id: str
     transport_type: TransportType
     capabilities: tuple[str, ...]
+    priority: int = 100  # Lower is higher priority for fallbacks
     credential_env: str | None = None
     credential_url: str | None = None
     credential_attr: str | None = None
@@ -44,6 +45,9 @@ class ProviderDescriptor:
     default_base_url: str | None = None
     base_url_attr: str | None = None
     proxy_attr: str | None = None
+    rate_limit: int | None = None  # Per-provider override; None = use global default
+    rate_window: int | None = None  # Per-provider override; None = use global default
+    max_input_tokens: int = 0  # Max input context window; 0 = unlimited
 
 
 PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
@@ -56,6 +60,8 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         default_base_url=NVIDIA_NIM_DEFAULT_BASE,
         proxy_attr="nvidia_nim_proxy",
         capabilities=("chat", "streaming", "tools", "thinking", "rate_limit"),
+        rate_limit=40,
+        rate_window=60,
     ),
     "open_router": ProviderDescriptor(
         provider_id="open_router",
@@ -65,7 +71,14 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="open_router_api_key",
         default_base_url=OPENROUTER_DEFAULT_BASE,
         proxy_attr="open_router_proxy",
-        capabilities=("chat", "streaming", "tools", "thinking", "native_anthropic"),
+        capabilities=(
+            "chat",
+            "streaming",
+            "tools",
+            "thinking",
+            "native_anthropic",
+            "prompt_caching",
+        ),
     ),
     "deepseek": ProviderDescriptor(
         provider_id="deepseek",
@@ -74,7 +87,14 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_url="https://platform.deepseek.com/api_keys",
         credential_attr="deepseek_api_key",
         default_base_url=DEEPSEEK_ANTHROPIC_DEFAULT_BASE,
-        capabilities=("chat", "streaming", "tools", "thinking", "native_anthropic"),
+        capabilities=(
+            "chat",
+            "streaming",
+            "tools",
+            "thinking",
+            "native_anthropic",
+            "prompt_caching",
+        ),
     ),
     "lmstudio": ProviderDescriptor(
         provider_id="lmstudio",
@@ -126,7 +146,14 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="wafer_api_key",
         default_base_url=WAFER_DEFAULT_BASE,
         proxy_attr="wafer_proxy",
-        capabilities=("chat", "streaming", "tools", "thinking", "native_anthropic"),
+        capabilities=(
+            "chat",
+            "streaming",
+            "tools",
+            "thinking",
+            "native_anthropic",
+            "prompt_caching",
+        ),
     ),
     "opencode": ProviderDescriptor(
         provider_id="opencode",
@@ -137,6 +164,8 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         default_base_url=OPENCODE_DEFAULT_BASE,
         proxy_attr="opencode_proxy",
         capabilities=("chat", "streaming", "tools", "thinking", "rate_limit"),
+        rate_limit=60,
+        rate_window=60,
     ),
     "opencode_go": ProviderDescriptor(
         provider_id="opencode_go",
@@ -147,6 +176,8 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         default_base_url=OPENCODE_GO_DEFAULT_BASE,
         proxy_attr="opencode_go_proxy",
         capabilities=("chat", "streaming", "tools", "thinking", "rate_limit"),
+        rate_limit=60,
+        rate_window=60,
     ),
     "zai": ProviderDescriptor(
         provider_id="zai",
@@ -156,6 +187,8 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         default_base_url=ZAI_DEFAULT_BASE,
         proxy_attr="zai_proxy",
         capabilities=("chat", "streaming", "tools", "thinking", "rate_limit"),
+        rate_limit=30,
+        rate_window=60,
     ),
     "fireworks": ProviderDescriptor(
         provider_id="fireworks",
@@ -166,6 +199,8 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         default_base_url=FIREWORKS_DEFAULT_BASE,
         proxy_attr="fireworks_proxy",
         capabilities=("chat", "streaming", "tools", "thinking", "rate_limit"),
+        rate_limit=60,
+        rate_window=60,
     ),
     "google_ai_studio": ProviderDescriptor(
         provider_id="google_ai_studio",
@@ -175,7 +210,8 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="gemini_api_key",
         default_base_url=GEMINI_DEFAULT_BASE,
         proxy_attr="gemini_proxy",
-        capabilities=("chat", "streaming", "tools"),
+        capabilities=("chat", "streaming", "tools", "prompt_caching"),
+        max_input_tokens=200_000,
     ),
 }
 

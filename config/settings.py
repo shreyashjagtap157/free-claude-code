@@ -258,6 +258,11 @@ class Settings(BaseSettings):
         default=2000, validation_alias="MAX_TOOL_RESULT_TOKENS"
     )
 
+    # ==================== Prompt Response Cache ====================
+    enable_cache: bool = Field(default=True, validation_alias="ENABLE_CACHE")
+    cache_max_entries: int = Field(default=256, validation_alias="CACHE_MAX_ENTRIES")
+    cache_ttl_seconds: int = Field(default=300, validation_alias="CACHE_TTL_SECONDS")
+
     # ==================== Local web server tools (web_search / web_fetch) ====================
     # Off by default: these tools perform outbound HTTP from the proxy (SSRF risk).
     enable_web_server_tools: bool = Field(

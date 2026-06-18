@@ -10,6 +10,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from core.anthropic.cache_control import inject_cache_control as _inject_cache_control
+
 _REQUEST_FIELDS = (
     "model",
     "messages",
@@ -248,6 +250,7 @@ def build_base_native_anthropic_request_body(
             thinking_enabled=thinking_enabled,
         )
 
+    _inject_cache_control(body)
     return body
 
 
@@ -284,4 +287,5 @@ def build_openrouter_native_request_body(
     if thinking_enabled:
         _apply_openrouter_reasoning_policy(body, thinking_cfg)
 
+    _inject_cache_control(body)
     return body

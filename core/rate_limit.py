@@ -1,4 +1,4 @@
-"""Shared strict sliding-window rate limiting primitives."""
+"""Shared rate limiting primitives."""
 
 from __future__ import annotations
 
@@ -58,3 +58,42 @@ class StrictSlidingWindowLimiter:
 
     async def __aexit__(self, exc_type, exc, tb) -> bool:
         return False
+
+
+class FixedSpacingLimiter:
+    """Evenly spaces acquisitions at ``rate_window / rate_limit`` seconds apart.
+
+    Unlike :class:`StrictSlidingWindowLimiter` (which allows bursts of up to
+    ``rate_limit`` requests followed by a stall of up to ``rate_window``
+    seconds), this limiter ensures a constant inter-arrival time.
+
+    For example, with ``rate_limit=40, rate_window=60``, each request is
+    spaced exactly 1.5 seconds after the previous one.  The first request
+    in a burst passes through immediately; subsequent concurrent requests
+    are queued and released one-by-one at the configured interval.
+
+    This is ideal for upstream providers with a hard per-minute cap where
+    burst-then-stall behavior would cause long, unpredictable pauses for
+    interactive clients (e.g. Claude Code).
+    """
+
+    def __init__(self, rate_limit: int, rate_window: float) -> None:
+        if rate_limit <= 0:
+            raise ValueError("rate_limit must be > 0")
+        if rate_window <= 0:
+            raise ValueError("rate_window must be > 0")
+
+        self._interval = rate_window / rate_limit
+        self._last_time: float = 0.0
+        self._lock = asyncio.Lock()
+
+    async def acquire(self) -> None:
+        """Wait until the next slot, then return."""
+        while True:
+            async with self._lock:
+                now = time.monotonic()
+                wait = max(0.0, self._last_time + self._interval - now)
+                if wait <= 0.0:
+                    self._last_time = now
+                    return
+            await asyncio.sleep(wait)

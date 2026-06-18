@@ -16,9 +16,14 @@ from config.settings import Settings
 from core.anthropic import (
     get_token_count,
     get_user_facing_error_message,
-    trim_messages_for_context_budget,
 )
 from core.anthropic.sse import ANTHROPIC_SSE_RESPONSE_HEADERS
+from core.cache import PromptCache, cache_key_for_request, make_cached_stream
+from core.cache.engine import CacheCollector
+from core.management.metrics import HardwareMonitor, SessionTracker
+from core.management.model import ModelManager
+from core.management.runtime import RuntimeManager
+from core.orchestrator import ContextOrchestrator
 from core.trace import api_messages_request_snapshot, trace_event, traced_async_stream
 from providers.base import BaseProvider
 from providers.exceptions import InvalidRequestError, ProviderError
@@ -55,6 +60,27 @@ def anthropic_sse_streaming_response(
         media_type="text/event-stream",
         headers=ANTHROPIC_SSE_RESPONSE_HEADERS,
     )
+
+
+async def _cache_and_yield(
+    cache: PromptCache,
+    cache_key: str,
+    collector: CacheCollector,
+) -> AsyncIterator[str]:
+    """Iterate the collector, caching the full response if it completes."""
+    try:
+        async for chunk in collector:
+            yield chunk
+    except BaseException:
+        raise
+    else:
+        if collector.collected:
+            cache.set(cache_key, collector.collected)
+            logger.info(
+                "CACHE_MISS: stored key={} lines={}",
+                cache_key[:12],
+                len(collector.collected),
+            )
 
 
 def _http_status_for_unexpected_service_exception(_exc: BaseException) -> int:
@@ -103,32 +129,40 @@ class ClaudeProxyService:
         model_router: ModelRouter | None = None,
         token_counter: TokenCounter = get_token_count,
         evict_provider: Callable[[str], None] | None = None,
+        cache: PromptCache | None = None,
     ):
         self._settings = settings
         self._provider_getter = provider_getter
         self._model_router = model_router or ModelRouter(settings)
         self._token_counter = token_counter
         self._evict_provider = evict_provider
+        self._orchestrator = ContextOrchestrator(settings, provider_getter)
+        self._cache = cache
 
-    def _apply_context_trimming(self, request_data: MessagesRequest) -> MessagesRequest:
-        """Apply server-side context trimming for providers without prompt caching."""
-        max_ctx = self._settings.max_context_tokens
-        max_tool = self._settings.max_tool_result_tokens
-        if max_ctx <= 0 and max_tool <= 0:
-            return request_data
+        # SOTA Management Layer
+        config_path: str = getattr(settings, "config_path", ".letta/config.json")
+        self.runtime_manager = RuntimeManager(config_path)
+        self.model_manager = ModelManager()
+        self.session_tracker = SessionTracker()
+        self.hw_monitor = HardwareMonitor()
+        self.hw_monitor.start()
 
-        trimmed_messages = trim_messages_for_context_budget(
+    def _apply_context_orchestration(
+        self, request_data: MessagesRequest, provider_id: str
+    ) -> MessagesRequest:
+        """Apply intelligent context management via the orchestrator."""
+        optimized_messages = self._orchestrator.optimize_context(
             request_data.messages,
             request_data.system,
             request_data.tools,
-            max_context_tokens=max_ctx,
-            max_tool_result_tokens=max_tool,
+            provider_id=provider_id,
+            provider_catalog=PROVIDER_CATALOG,
         )
-        if trimmed_messages is request_data.messages:
+        if optimized_messages is request_data.messages:
             return request_data
-        return request_data.model_copy(update={"messages": trimmed_messages})
+        return request_data.model_copy(update={"messages": optimized_messages})
 
-    def create_message(self, request_data: MessagesRequest) -> object:
+    async def create_message(self, request_data: MessagesRequest) -> object:
         """Create a message response or streaming response."""
         try:
             _require_non_empty_messages(request_data.messages)
@@ -176,35 +210,11 @@ class ClaudeProxyService:
                     model=routed.request.model,
                 )
                 return optimized
-            logger.debug("No optimization matched, routing to provider")
-
-            # Apply context trimming for OpenAI Chat upstreams (no prompt caching).
+                # Apply intelligent context orchestration.
             effective_request = routed.request
-            if routed.resolved.provider_id in _OPENAI_CHAT_UPSTREAM_IDS:
-                effective_request = self._apply_context_trimming(routed.request)
-
-            provider = self._provider_getter(routed.resolved.provider_id)
-            try:
-                provider.preflight_stream(
-                    effective_request,
-                    thinking_enabled=routed.resolved.thinking_enabled,
-                )
-            except Exception:
-                # Evict the provider so a fresh one is created next request.
-                evict = self._evict_provider
-                if evict is not None:
-                    evict(routed.resolved.provider_id)
-                raise
-
-            trace_event(
-                stage="routing",
-                event="api.route.resolved",
-                source="api",
-                provider_id=routed.resolved.provider_id,
-                provider_model=routed.resolved.provider_model,
-                provider_model_ref=routed.resolved.provider_model_ref,
-                gateway_model=effective_request.model,
-                thinking_enabled=routed.resolved.thinking_enabled,
+            provider_id = routed.resolved.provider_id
+            effective_request = self._apply_context_orchestration(
+                routed.request, provider_id
             )
 
             request_id = f"req_{uuid.uuid4().hex[:12]}"
@@ -230,13 +240,88 @@ class ClaudeProxyService:
                     effective_request.tools,
                 )
 
-                streamed = traced_async_stream(
-                    provider.stream_response(
+                # Track session metrics
+                self.session_tracker.update_request_metrics(
+                    in_t=input_tokens,
+                    out_t=0,  # Updated after stream completion
+                    added=0,
+                    removed=0,
+                )
+
+                # Enterprise prompt cache: check for cached response.
+                cache_key: str | None = None
+                if self._cache is not None:
+                    cache_key = cache_key_for_request(
+                        model=effective_request.model,
+                        system=effective_request.system,
+                        messages=effective_request.messages,
+                        tools=effective_request.tools,
+                        stream=True,
+                    )
+                    cached = self._cache.get(cache_key)
+                    if cached is not None:
+                        logger.info(
+                            "CACHE_HIT key={} lines={} model={}",
+                            cache_key[:12],
+                            len(cached),
+                            effective_request.model,
+                        )
+                        return anthropic_sse_streaming_response(
+                            make_cached_stream(cached)
+                        )
+
+                # Wrap the provider call in a fallback loop to ensure reliability.
+                async def attempt_provider_call(pid: str):
+                    provider = self._provider_getter(pid)
+                    try:
+                        provider.preflight_stream(
+                            effective_request,
+                            thinking_enabled=routed.resolved.thinking_enabled,
+                        )
+                    except Exception:
+                        if self._evict_provider:
+                            self._evict_provider(pid)
+                        raise
+
+                    return provider.stream_response(
                         effective_request,
                         input_tokens=input_tokens,
                         request_id=request_id,
                         thinking_enabled=routed.resolved.thinking_enabled,
-                    ),
+                    )
+
+                try:
+                    # Execute with fallback orchestration
+                    streamed_generator = await self._orchestrator.execute_with_fallback(
+                        request_data=effective_request,
+                        primary_provider_id=provider_id,
+                        callback=attempt_provider_call,
+                        provider_catalog=PROVIDER_CATALOG,
+                    )
+                except ProviderError:
+                    raise
+                except Exception as e:
+                    _log_unexpected_service_exception(
+                        self._settings, e, context="FALLBACK_EXHAUSTED"
+                    )
+                    raise HTTPException(
+                        status_code=502,
+                        detail="All available providers failed to fulfill the request.",
+                    ) from e
+
+                trace_event(
+                    stage="routing",
+                    event="api.route.resolved",
+                    source="api",
+                    provider_id=provider_id,
+                    provider_model=routed.resolved.provider_model,
+                    provider_model_ref=routed.resolved.provider_model_ref,
+                    gateway_model=effective_request.model,
+                    thinking_enabled=routed.resolved.thinking_enabled,
+                )
+
+                streamed = traced_async_stream(
+                    streamed_generator,
                     stage="egress",
                     source="api",
                     complete_event="api.response.stream_completed",
@@ -244,10 +329,18 @@ class ClaudeProxyService:
                     chunk_event=None,
                     extra={
                         "request_id": request_id,
-                        "provider_id": routed.resolved.provider_id,
+                        "provider_id": provider_id,
                         "gateway_model": effective_request.model,
                     },
                 )
+
+                # Enterprise prompt cache: record streamed SSE lines on miss.
+                if self._cache is not None and cache_key is not None:
+                    collector = CacheCollector(streamed)
+                    return anthropic_sse_streaming_response(
+                        _cache_and_yield(self._cache, cache_key, collector)
+                    )
+
                 return anthropic_sse_streaming_response(streamed)
 
         except ProviderError:
@@ -260,6 +353,11 @@ class ClaudeProxyService:
                 status_code=_http_status_for_unexpected_service_exception(e),
                 detail=get_user_facing_error_message(e),
             ) from e
+
+    @property
+    def cache(self) -> PromptCache | None:
+        """Expose the cache instance for admin API stats/clearing."""
+        return self._cache
 
     def count_tokens(self, request_data: TokenCountRequest) -> TokenCountResponse:
         """Count tokens for a request after applying configured model routing."""
