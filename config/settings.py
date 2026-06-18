@@ -351,6 +351,9 @@ class Settings(BaseSettings):
     anthropic_auth_token: str = Field(
         default="", validation_alias="ANTHROPIC_AUTH_TOKEN", repr=False
     )
+    # Per-instance model override: set via X-FCC-Model header or FCC_MODEL env.
+    # Not persisted; used for request-scoped model routing.
+    model_override: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -499,9 +502,11 @@ class Settings(BaseSettings):
     def resolve_model(self, claude_model_name: str) -> str:
         """Resolve a Claude model name to the configured provider/model string.
 
-        Classifies the incoming Claude model (opus/sonnet/haiku) and
-        returns the model-specific override if configured, otherwise the fallback MODEL.
+        If a per-instance model override is set (via X-FCC-Model header),
+        it takes precedence over all other resolution logic.
         """
+        if self.model_override is not None:
+            return self.model_override
         name_lower = claude_model_name.lower()
         if "opus" in name_lower and self.model_opus is not None:
             return self.model_opus

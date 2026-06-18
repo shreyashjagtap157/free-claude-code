@@ -23,6 +23,7 @@ from cli.process_registry import (
     unregister_pid,
 )
 from config.settings import Settings, get_settings
+from core.session_registry import get_session_registry
 
 PROXY_PREFLIGHT_PATH = "/health"
 PROXY_PREFLIGHT_TIMEOUT_SECONDS = 1.5
@@ -130,7 +131,11 @@ def init() -> None:
 
 
 def _claude_child_env(
-    settings: Settings, base_env: Mapping[str, str]
+    settings: Settings,
+    base_env: Mapping[str, str],
+    *,
+    session_id: str | None = None,
+    model_override: str | None = None,
 ) -> dict[str, str]:
     """Return a Claude Code environment that targets this proxy."""
 
@@ -143,6 +148,10 @@ def _claude_child_env(
     env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] = "1"
     if token := settings.anthropic_auth_token.strip():
         env["ANTHROPIC_AUTH_TOKEN"] = token
+    if session_id:
+        env["FCC_SESSION_ID"] = session_id
+    if model_override:
+        env["FCC_MODEL"] = model_override
     return env
 
 
@@ -194,8 +203,9 @@ def launch_claude(argv: Sequence[str] | None = None) -> None:
 
     raw_args = list(sys.argv[1:] if argv is None else argv)
 
-    # Extract --port override before forwarding remaining args to Claude CLI.
+    # Extract --port and --model overrides before forwarding remaining args.
     port_override: int | str | None = None
+    model_override: str | None = None
     forwarded_args: list[str] = []
     i = 0
     while i < len(raw_args):
@@ -229,24 +239,32 @@ def launch_claude(argv: Sequence[str] | None = None) -> None:
                     raise SystemExit(1) from None
             i += 1
             continue
+        if raw_args[i] == "--model" and i + 1 < len(raw_args):
+            model_override = raw_args[i + 1]
+            i += 2
+            continue
+        if raw_args[i].startswith("--model="):
+            model_override = raw_args[i].split("=", 1)[1]
+            i += 1
+            continue
         forwarded_args.append(raw_args[i])
         i += 1
 
-    # Check environment variable override
+    # Check environment variable overrides
     env_port = os.environ.get("FCC_PORT")
     if env_port and env_port.lower() == "auto" and port_override is None:
         port_override = "auto"
+    if model_override is None:
+        model_override = os.environ.get("FCC_MODEL")
 
     settings = get_settings()
     if port_override is not None:
         if port_override == "auto":
-            # Target the main server URL to allocate a port
             main_url = local_proxy_root_url(settings)
             allocated_port = _allocate_dynamic_port(main_url)
             print(f"Auto-allocated dynamic port: {allocated_port}", file=sys.stderr)
             settings.port = allocated_port
         else:
-            # Override settings port for this fcc-claude session.
             settings.port = int(port_override)
 
     proxy_root_url = local_proxy_root_url(settings)
@@ -276,8 +294,19 @@ def launch_claude(argv: Sequence[str] | None = None) -> None:
         )
         raise SystemExit(127)
 
+    # Register this instance with the server's session registry
+    registry = get_session_registry()
+    session_id = registry.register(
+        pid=os.getpid(),
+        model_override=model_override,
+        port=settings.port,
+    )
+    print(f"Session registered: {session_id}", file=sys.stderr)
+
     command = [claude_command, *forwarded_args]
-    env = _claude_child_env(settings, os.environ)
+    env = _claude_child_env(
+        settings, os.environ, session_id=session_id, model_override=model_override
+    )
     process: subprocess.Popen[bytes] | None = None
     try:
         process = subprocess.Popen(command, env=env)
@@ -300,6 +329,7 @@ def launch_claude(argv: Sequence[str] | None = None) -> None:
             process.wait()
         raise
     finally:
+        registry.unregister(session_id)
         if process is not None and process.pid:
             unregister_pid(process.pid)
 

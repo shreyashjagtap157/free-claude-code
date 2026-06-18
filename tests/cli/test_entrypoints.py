@@ -226,21 +226,27 @@ def test_launch_claude_passes_args_and_child_env(
         patch("cli.entrypoints.subprocess.Popen") as popen,
         patch("cli.entrypoints.register_pid") as register_pid,
         patch("cli.entrypoints.unregister_pid") as unregister_pid,
+        patch("cli.entrypoints.get_session_registry") as mock_registry,
         pytest.raises(SystemExit) as exc_info,
     ):
         process = popen.return_value
         process.pid = 12345
         process.wait.return_value = 7
+        mock_registry.return_value.register.return_value = "fcc-test1234"
         launch_claude(["--model", "sonnet"])
 
     assert exc_info.value.code == 7
     popen.assert_called_once()
-    assert popen.call_args.args[0] == ["resolved-claude.cmd", "--model", "sonnet"]
+    # --model is intercepted (not forwarded to Claude CLI)
+    assert popen.call_args.args[0] == ["resolved-claude.cmd"]
     child_env = popen.call_args.kwargs["env"]
     assert child_env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9191"
     assert child_env["ANTHROPIC_AUTH_TOKEN"] == "proxy-token"
     assert child_env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] == "1"
     assert child_env["KEEP_ME"] == "yes"
+    # Per-instance overrides are passed to child env
+    assert child_env["FCC_SESSION_ID"] == "fcc-test1234"
+    assert child_env["FCC_MODEL"] == "sonnet"
     register_pid.assert_called_once_with(12345)
     unregister_pid.assert_called_once_with(12345)
 
@@ -258,11 +264,13 @@ def test_launch_claude_keyboard_interrupt_kills_child_tree() -> None:
         patch("cli.entrypoints.register_pid"),
         patch("cli.entrypoints.kill_pid_tree_best_effort") as kill_tree,
         patch("cli.entrypoints.unregister_pid") as unregister_pid,
+        patch("cli.entrypoints.get_session_registry") as mock_registry,
         pytest.raises(KeyboardInterrupt),
     ):
         process = popen.return_value
         process.pid = 12345
         process.wait.side_effect = [KeyboardInterrupt, 0]
+        mock_registry.return_value.register.return_value = "fcc-test1234"
 
         launch_claude([])
 

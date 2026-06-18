@@ -430,3 +430,59 @@ async def _check_local_provider(
             "base_url": base_url,
             "error_type": type(exc).__name__,
         }
+
+
+# ==================== Session Management ====================
+
+
+@router.get("/admin/api/sessions")
+async def list_sessions(request: Request):
+    """List all connected fcc-claude instances."""
+    require_loopback_admin(request)
+    from core.session_registry import get_session_registry
+
+    registry = get_session_registry()
+    sessions = registry.list_sessions()
+    return {
+        "sessions": [
+            {
+                "session_id": s.session_id,
+                "created_at": s.created_at,
+                "last_heartbeat": s.last_heartbeat,
+                "pid": s.pid,
+                "model_override": s.model_override,
+                "port": s.port,
+                "status": s.status,
+                "metadata": s.metadata,
+            }
+            for s in sessions
+        ],
+        **registry.get_stats(),
+    }
+
+
+@router.post("/admin/api/sessions/{session_id}/stop")
+async def stop_session(session_id: str, request: Request):
+    """Stop a connected fcc-claude instance."""
+    require_loopback_admin(request)
+    from core.session_registry import get_session_registry
+
+    registry = get_session_registry()
+    if registry.stop_session(session_id):
+        return {"ok": True, "session_id": session_id}
+    raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+
+@router.post("/admin/api/sessions/heartbeat")
+async def session_heartbeat(request: Request):
+    """Receive a heartbeat from a connected fcc-claude instance."""
+    from core.session_registry import get_session_registry
+
+    body = await request.json()
+    session_id = body.get("session_id")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id required")
+    registry = get_session_registry()
+    if registry.heartbeat(session_id):
+        return {"ok": True}
+    raise HTTPException(status_code=404, detail=f"Session {session_id} not found")

@@ -168,16 +168,29 @@ def create_app(
 
     @app.middleware("http")
     async def unified_middleware(request: Request, call_next):
-        """Unified middleware for rate limiting, security, and tracing (⚡ Bolt Optimization).
+        """Unified middleware for rate limiting, security, and tracing.
 
-        Consolidating multiple middlewares into one reduces TaskGroup overhead and avoids
-        Starlette's 'No response returned' RuntimeError in complex middleware stacks.
+        Also extracts per-instance model override (X-FCC-Model) and
+        session ID (X-FCC-Session-ID) from request headers.
         """
         start_time = time.perf_counter()
         if request.url.path != "/health":
             with suppress(AttributeError):
                 request.app.state.has_received_request = True
         claude_sid = extract_claude_session_id_from_headers(request.headers)
+
+        # Extract per-instance overrides from headers
+        fcc_model = request.headers.get("x-fcc-model")
+        fcc_session_id = request.headers.get("x-fcc-session-id")
+        if fcc_model:
+            request.state.fcc_model_override = fcc_model
+        if fcc_session_id:
+            request.state.fcc_session_id = fcc_session_id
+            # Update heartbeat in session registry
+            from core.session_registry import get_session_registry
+
+            get_session_registry().heartbeat(fcc_session_id)
+
         runtime = getattr(request.app.state, "runtime", None)
         if isinstance(runtime, AppRuntime):
             runtime.increment_requests()

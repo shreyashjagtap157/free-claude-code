@@ -65,8 +65,16 @@ def get_proxy_service(
     request: Request,
     settings: Settings = Depends(get_settings),
 ) -> ClaudeProxyService:
-    """Build the request service for route handlers."""
+    """Build the request service for route handlers.
+
+    Applies per-instance model override from X-FCC-Model header if present.
+    """
     app = request.app
+
+    # Apply per-instance model override from middleware
+    fcc_model_override = getattr(request.state, "fcc_model_override", None)
+    if fcc_model_override:
+        settings = settings.model_copy(update={"model_override": fcc_model_override})
 
     def _evict(provider_id: str) -> None:
         reg = getattr(app.state, "provider_registry", None)
