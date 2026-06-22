@@ -50,7 +50,9 @@ def parse_cli_event(event: Any, *, log_raw_cli: bool = False) -> list[dict]:
             msg_obj = {"content": event.get("content")}
 
     if msg_obj and isinstance(msg_obj, dict):
-        content = msg_obj.get("content", [])
+        # ⚡ Bolt: Use .get("content") instead of .get("content", []) to avoid
+        # eager empty list allocation in this high-frequency streaming parser.
+        content = msg_obj.get("content")
         if isinstance(content, list):
             # Preserve order exactly as content blocks appear.
             for c in content:
