@@ -123,8 +123,8 @@ async def test_init(provider_config):
 
 
 @pytest.mark.asyncio
-async def test_init_uses_configurable_timeouts():
-    """Test that provider passes configurable read/write/connect timeouts to client."""
+async def test_init_uses_nim_specific_timeouts():
+    """Test that NvidiaNimProvider overrides timeouts with NimSettings values."""
     from providers.base import ProviderConfig
 
     config = ProviderConfig(
@@ -138,9 +138,11 @@ async def test_init_uses_configurable_timeouts():
         NvidiaNimProvider(config, nim_settings=NimSettings())
         call_kwargs = mock_openai.call_args[1]
         timeout = call_kwargs["timeout"]
-        assert timeout.read == 600.0
-        assert timeout.write == 15.0
-        assert timeout.connect == 5.0
+        # NvidiaNimProvider._build_client_kwargs() overrides timeout with
+        # NimSettings values (120/30/30 defaults), not config.http_read_timeout
+        assert timeout.read == 120.0
+        assert timeout.write == 30.0
+        assert timeout.connect == 30.0
 
 
 @pytest.mark.asyncio
@@ -353,12 +355,6 @@ async def test_stream_response_suppresses_thinking_when_disabled(provider_config
     assert "Answer" in event_text
 
 
-def _make_bad_request_error(message: str) -> openai.BadRequestError:
-    response = Response(status_code=400, request=Request("POST", "http://test"))
-    body = {"error": {"message": message}}
-    return openai.BadRequestError(message, response=response, body=body)
-
-
 @pytest.mark.asyncio
 async def test_stream_response_retries_without_chat_template(provider_config):
     provider = NvidiaNimProvider(
@@ -417,7 +413,10 @@ async def test_stream_response_retries_without_chat_template(provider_config):
 
 
 @pytest.mark.asyncio
-async def test_stream_response_does_not_retry_unrelated_bad_request(provider_config):
+async def test_stream_response_does_not_retry_unmatched_bad_request(
+    provider_config,
+):
+    """An unrecognized 400 error does NOT trigger a blind retry."""
     provider = NvidiaNimProvider(
         provider_config,
         nim_settings=NimSettings(chat_template="custom_template"),
@@ -431,6 +430,7 @@ async def test_stream_response_does_not_retry_unrelated_bad_request(provider_con
 
         events = [e async for e in provider.stream_response(req)]
 
+    # No comprehensive cleanup retry — the error doesn't match any known pattern
     assert mock_create.await_count == 1
     event_text = "".join(events)
     assert "Invalid request sent to provider" in event_text
@@ -755,9 +755,10 @@ async def test_stream_response_retries_without_reasoning_content(nim_provider):
 
 
 @pytest.mark.asyncio
-async def test_stream_response_bad_request_without_reasoning_budget_does_not_retry(
+async def test_stream_response_bad_request_without_known_pattern_does_not_retry(
     nim_provider,
 ):
+    """Unrecognized 400 errors do NOT get a blind comprehensive cleanup retry."""
     req = MockRequest()
     error = _make_bad_request_error("Unsupported field: top_k")
 
@@ -768,6 +769,7 @@ async def test_stream_response_bad_request_without_reasoning_budget_does_not_ret
 
         events = [e async for e in nim_provider.stream_response(req)]
 
+    # No retry — the error doesn't match any known pattern
     assert mock_create.await_count == 1
     assert any("Invalid request sent to provider" in event for event in events)
     assert any("message_stop" in event for event in events)

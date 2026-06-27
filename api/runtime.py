@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import os
 import sys
 import time
-try:
-    import psutil
-except ImportError:
-    psutil = None
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -17,7 +14,8 @@ from fastapi import FastAPI
 from loguru import logger
 
 from api.admin_urls import local_admin_url, local_proxy_root_url
-from config.settings import Settings, get_settings
+from config.constants import DEFAULT_CONTEXT_WINDOW
+from config.settings import ConfiguredChatModelRef, Settings, get_settings
 from providers.exceptions import ServiceUnavailableError
 from providers.registry import ProviderRegistry
 
@@ -27,7 +25,7 @@ if TYPE_CHECKING:
     from messaging.platforms.base import MessagingPlatform
     from messaging.session import SessionStore
 
-_SHUTDOWN_TIMEOUT_S = 5.0
+_SHUTDOWN_TIMEOUT_S = 2.0
 
 
 async def best_effort(
@@ -71,7 +69,7 @@ def warn_if_process_auth_token(settings: Settings) -> None:
 
 def warn_if_weak_auth_token(settings: Settings) -> None:
     """Warn when the server auth token is too weak."""
-    token = settings.anthropic_auth_token
+    token = settings.anthropic_auth_token.get_secret_value()
     if not token:
         return
     if len(token) < 8:
@@ -129,16 +127,25 @@ class AppRuntime:
         """Mark an active request completed."""
         self._active_requests = max(0, self._active_requests - 1)
 
+    @staticmethod
+    def _get_psutil():
+        """Lazy import psutil; returns None when not installed."""
+        try:
+            return importlib.import_module("psutil")
+        except ImportError:
+            return None
+
     def get_stats(self) -> dict[str, Any]:
         """Return server runtime statistics."""
         memory_mb = 0.0
-        if psutil:
+        psutil_mod = self._get_psutil()
+        if psutil_mod is not None:
             try:
-                process = psutil.Process(os.getpid())
+                process = psutil_mod.Process(os.getpid())
                 memory_mb = process.memory_info().rss / (1024 * 1024)
             except Exception:
                 pass
-        
+
         return {
             "uptime_seconds": int(time.time() - self._start_time),
             "total_requests": self._total_requests,
@@ -164,7 +171,7 @@ class AppRuntime:
         try:
             warn_if_process_auth_token(self.settings)
             warn_if_weak_auth_token(self.settings)
-            await self._validate_configured_models_best_effort()
+            asyncio.create_task(self._validate_configured_models_best_effort())
             self._provider_registry.start_model_list_refresh(self.settings)
             await self._start_messaging_if_configured()
             self._publish_state()
@@ -245,15 +252,19 @@ class AppRuntime:
             self.messaging_platform = create_messaging_platform(
                 self.settings.messaging_platform,
                 MessagingPlatformOptions(
-                    telegram_bot_token=self.settings.telegram_bot_token,
+                    telegram_bot_token=self.settings.telegram_bot_token.get_secret_value()
+                    if self.settings.telegram_bot_token is not None
+                    else None,
                     allowed_telegram_user_id=self.settings.allowed_telegram_user_id,
-                    discord_bot_token=self.settings.discord_bot_token,
+                    discord_bot_token=self.settings.discord_bot_token.get_secret_value()
+                    if self.settings.discord_bot_token is not None
+                    else None,
                     allowed_discord_channels=self.settings.allowed_discord_channels,
                     voice_note_enabled=self.settings.voice_note_enabled,
                     whisper_model=self.settings.whisper_model,
                     whisper_device=self.settings.whisper_device,
                     hf_token=self.settings.hf_token,
-                    nvidia_nim_api_key=self.settings.nvidia_nim_api_key,
+                    nvidia_nim_api_key=self.settings.nvidia_nim_api_key.get_secret_value(),
                     messaging_rate_limit=self.settings.messaging_rate_limit,
                     messaging_rate_window=self.settings.messaging_rate_window,
                     log_raw_messaging_content=self.settings.log_raw_messaging_content,
@@ -284,6 +295,36 @@ class AppRuntime:
                     type(e).__name__,
                 )
 
+    def _compute_effective_context_window(
+        self,
+        configured_refs: tuple[ConfiguredChatModelRef, ...],
+        default: int,
+    ) -> int:
+        """Compute the minimum context window across configured provider models.
+
+        Uses cached ``ProviderModelInfo.context_window`` from the registry when
+        available, falling back to ``default`` when no model has metadata or the
+        registry is not yet populated.
+        """
+        if self._provider_registry is None:
+            return default
+
+        min_window: int | None = None
+        for ref in configured_refs:
+            info = self._provider_registry.cached_model_info(
+                ref.provider_id, ref.model_id
+            )
+            if (
+                info is not None
+                and info.context_window is not None
+                and (min_window is None or info.context_window < min_window)
+            ):
+                min_window = info.context_window
+
+        if min_window is not None:
+            return min_window
+        return default
+
     async def _start_message_handler(self) -> None:
         from cli.manager import CLISessionManager
         from messaging.handler import ClaudeMessageHandler
@@ -299,6 +340,27 @@ class AppRuntime:
         data_path = os.path.abspath(self.settings.claude_workspace)
         os.makedirs(data_path, exist_ok=True)
 
+        # Compute effective context window from provider model metadata when available.
+        configured_refs = self.settings.configured_chat_model_refs()
+        effective_context_window = self._compute_effective_context_window(
+            configured_refs,
+            self.settings.auto_compact_context_window or DEFAULT_CONTEXT_WINDOW,
+        )
+
+        # Resolve vision/tool/output capabilities from the registry for the primary configured model.
+        supports_vision: bool | None = None
+        supports_tools: bool | None = None
+        max_output_tokens: int | None = None
+        if self._provider_registry is not None and configured_refs:
+            primary_ref = configured_refs[0]
+            info = self._provider_registry.cached_model_info(
+                primary_ref.provider_id, primary_ref.model_id
+            )
+            if info is not None:
+                supports_vision = info.supports_vision
+                supports_tools = info.supports_tools
+                max_output_tokens = info.max_output_tokens
+
         api_url = f"http://{self.settings.host}:{self.settings.port}/v1"
         allowed_dirs = [workspace] if self.settings.allowed_dir else []
         plans_dir_abs = os.path.abspath(
@@ -313,7 +375,14 @@ class AppRuntime:
             claude_bin=self.settings.claude_cli_bin,
             log_raw_cli_diagnostics=self.settings.log_raw_cli_diagnostics,
             log_messaging_error_details=self.settings.log_messaging_error_details,
+            auto_compact_enabled=self.settings.auto_compact_enabled,
+            auto_compact_threshold=self.settings.auto_compact_threshold,
+            auto_compact_context_window=effective_context_window,
+            supports_vision=supports_vision,
+            supports_tools=supports_tools,
+            max_output_tokens=max_output_tokens,
         )
+        self.cli_manager.start_reaper()
 
         session_store = SessionStore(
             storage_path=os.path.join(data_path, "sessions.json"),
@@ -371,7 +440,7 @@ class AppRuntime:
     async def _shutdown_limiter(self) -> None:
         verbose = self.settings.log_api_error_tracebacks
         try:
-            from messaging.limiter import MessagingRateLimiter
+            from messaging.limiter import get_messaging_rate_limiter
         except Exception as e:
             if verbose:
                 logger.debug(
@@ -387,8 +456,8 @@ class AppRuntime:
             return
 
         await best_effort(
-            "MessagingRateLimiter.shutdown_instance",
-            MessagingRateLimiter.shutdown_instance(),
+            "MessagingRateLimiter.shutdown",
+            get_messaging_rate_limiter().shutdown(),
             timeout_s=2.0,
             log_verbose_errors=verbose,
         )

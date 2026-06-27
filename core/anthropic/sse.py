@@ -1,18 +1,22 @@
 """SSE event builder for Anthropic-format streaming responses."""
 
+import asyncio
 import hashlib
 import json
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
 
 from loguru import logger
 
-try:
-    import tiktoken
 
-    ENCODER = tiktoken.get_encoding("cl100k_base")
-except Exception:
-    ENCODER = None
+def _get_encoder():
+    """Lazy import and cache tiktoken encoding (saves ~200ms startup)."""
+    try:
+        import tiktoken
+
+        return tiktoken.get_encoding("cl100k_base")
+    except Exception:
+        return None
 
 
 # Standard headers for Anthropic-style ``text/event-stream`` responses from this proxy.
@@ -21,6 +25,31 @@ ANTHROPIC_SSE_RESPONSE_HEADERS: dict[str, str] = {
     "Cache-Control": "no-cache",
     "Connection": "keep-alive",
 }
+
+KEEPALIVE_INTERVAL = 15.0  # seconds between SSE keepalive pings
+
+
+async def interleave_keepalive[T](
+    gen: AsyncIterator[T],
+    *,
+    interval: float = KEEPALIVE_INTERVAL,
+) -> AsyncIterator[T | str]:
+    """Interleave SSE keepalive comments during gaps in event generation.
+
+    Middleboxes may drop long-lived connections that send no data for extended
+    periods.  This wrapper periodically yields an SSE comment, which is ignored
+    by the client but keeps the TCP connection alive.
+    """
+    it = gen.__aiter__()
+    while True:
+        try:
+            event = await asyncio.wait_for(it.__anext__(), timeout=interval)
+            yield event
+        except TimeoutError:
+            yield ": keepalive\n\n"
+        except StopAsyncIteration:
+            return
+
 
 STOP_REASON_MAP = {
     "stop": "end_turn",
@@ -386,14 +415,15 @@ class SSEBuilder:
     def estimate_output_tokens(self) -> int:
         accumulated_text = self.accumulated_text
         accumulated_reasoning = self.accumulated_reasoning
-        if ENCODER:
-            text_tokens = len(ENCODER.encode(accumulated_text))
-            reasoning_tokens = len(ENCODER.encode(accumulated_reasoning))
+        encoder = _get_encoder()
+        if encoder is not None:
+            text_tokens = len(encoder.encode(accumulated_text))
+            reasoning_tokens = len(encoder.encode(accumulated_reasoning))
             tool_tokens = 0
             started_tool_count = 0
             for state in self.blocks.tool_states.values():
-                tool_tokens += len(ENCODER.encode(state.name))
-                tool_tokens += len(ENCODER.encode("".join(state.contents)))
+                tool_tokens += len(encoder.encode(state.name))
+                tool_tokens += len(encoder.encode("".join(state.contents)))
                 tool_tokens += 15
                 if state.started:
                     started_tool_count += 1

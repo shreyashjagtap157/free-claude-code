@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import SecretStr
 
 from config.settings import Settings
 
@@ -19,7 +20,7 @@ def _launcher_settings(
     return Settings.model_construct(
         host="0.0.0.0",
         port=port,
-        anthropic_auth_token=token,
+        anthropic_auth_token=SecretStr(token),
         claude_cli_bin=claude_bin,
     )
 

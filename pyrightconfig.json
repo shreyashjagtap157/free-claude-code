@@ -1,0 +1,9 @@
+{
+  "pythonVersion": "3.14",
+  "typeCheckingMode": "standard",
+  "reportMissingTypeStubs": false,
+  "reportMissingImports": false,
+  "venvPath": ".",
+  "venv": ".venv",
+  "exclude": ["**/node_modules", "**/__pycache__", "**/.venv"],
+}

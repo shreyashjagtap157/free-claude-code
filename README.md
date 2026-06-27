@@ -488,14 +488,73 @@ Run them in that order before pushing. CI enforces the same checks.
 - Register provider metadata in `config.provider_catalog` and factory wiring in `providers.registry`.
 - Add messaging platforms by implementing the `MessagingPlatform` interface in `messaging/`.
 
+## Troubleshooting
+
+### Authentication Failures
+
+- **Invalid API key**: Verify the key is correct and active. Check provider dashboard for key status.
+- **Missing environment variable**: Ensure the required `*_API_KEY` or `*_AUTH_TOKEN` is set in `.env` or the Admin UI.
+- **Expired key**: Some provider keys expire. Rotate expired keys in the Admin UI or `.env`.
+- **Proxy / VPN**: Corporate proxies or VPNs may interfere. Set `HTTP_PROXY` / `HTTPS_PROXY` environment variables.
+
+### Rate Limiting
+
+- **429 Too Many Requests**: The proxy applies both proactive and reactive rate limiting. Wait for backoff to clear or reduce request rate.
+- **All requests blocked**: A circuit breaker may have tripped after repeated failures. The limiter auto-recovers after a timeout (default: 30s).
+
+### Provider-Specific Issues
+
+- **NVIDIA NIM**: Verify your NIM API key is set. Some models may be region-restricted.
+- **OpenRouter**: Only tool-capable models are listed. If your model doesn't appear, check it supports the `tools` parameter.
+- **Ollama**: Ensure the Ollama server is running and accessible at the configured `OLLAMA_BASE_URL`. Pull models before use.
+- **LM Studio / llama.cpp**: Use a proxy base URL compatible with the Anthropic Messages endpoint format.
+- **DeepSeek / Wafer / Kimi**: Check API key validity and rate limits on the provider dashboard.
+
+## Troubleshooting
+
+### Authentication Failures
+
+- **"Authentication token is missing"**: Ensure `ANTHROPIC_AUTH_TOKEN` is set in `.env` or passed via `--auth-token`. The proxy uses this for its own API auth, separate from upstream provider keys.
+- **Provider rejects API key**: Verify the environment variable name for your provider (e.g. `NVIDIA_NIM_API_KEY`, `GOOGLE_API_KEY`, `OPENROUTER_API_KEY`). Check the Admin UI at `/admin` for key status.
+- **Google AI Studio**: Uses `x-goog-api-key` header. Set `GOOGLE_API_KEY` in `.env`. If using the Admin UI, ensure the key is saved and the provider appears as "configured".
+- **Bearer token mismatch**: If `--auth-token` was changed on an existing Claude Code session, start a new session with the updated token.
+
+### Rate Limiting
+
+- **"rate limit exceeded"** from a provider: Increase `PROVIDER_RATE_LIMIT` (default 40 req/min) or `PROVIDER_RATE_WINDOW` in `.env`.
+- **Messaging rate limiting**: Adjust `MESSAGING_RATE_LIMIT` (default 1) and `MESSAGING_RATE_WINDOW` (default 1.0s) in `.env`.
+- **OpenRouter**: Respects OpenRouter's tier-based rate limits; reduce concurrency with `PROVIDER_MAX_CONCURRENCY`.
+
+### Proxy Connection Issues
+
+- **"Connection refused"**: Verify the server is running (`fcc-server`). Default port is 8080. Check `HOST` and `PORT` in `.env`.
+- **Claude Code can't reach proxy**: Ensure `CLAUDE_PROXY` is set to the correct URL (e.g. `http://localhost:8080`). Proxy must use `http://`, not `https://` for local connections.
+- **Firewall blocking**: On Windows, allow the proxy port through Windows Defender Firewall. On Linux, check `ufw` or `iptables` rules.
+- **Admin UI at `/admin` is inaccessible**: The admin UI requires loopback access (localhost/127.0.0.1). It intentionally rejects external connections.
+
+### Model / Provider Errors
+
+- **"model not found"**: The model ID in the Catalog doesn't match upstream. Check available models via the Admin UI's "Test Connection" or from provider documentation.
+- **Streaming hangs**: Increase `HTTP_READ_TIMEOUT` (default 1800s). Check network latency to the upstream provider.
+- **Thinking blocks cause errors**: Disable with `ENABLE_MODEL_THINKING=false` for providers that don't support thinking (Kimi, LM Studio, Ollama with certain models).
+- **Web search/fetch tools fail**: Enable with `ENABLE_WEB_SERVER_TOOLS=true`. If behind a corporate proxy, configure per-provider proxy settings.
+
+### Windows-Specific Notes
+
+- Use forward slashes or escaped backslashes in file paths.
+- Use `set VAR=value` (CMD) or `$env:VAR="value"` (PowerShell) for environment variables.
+- If the proxy fails to start, check firewall rules and port availability.
+
+### Debugging
+
+1. Enable structured TRACE logging by running the proxy with `--log-level TRACE` or setting `LOG_LEVEL=TRACE` in `.env`.
+2. Enable `LOG_RAW_API_PAYLOADS=true` or `LOG_RAW_SSE_EVENTS=true` to inspect raw API traffic (disable after debugging).
+3. Check the server console output for error messages and trace events.
+4. For messaging platforms, enable `LOG_RAW_MESSAGING_CONTENT=true` to see message content.
+
 ## Contributing
 
-- Report bugs and feature requests in [Issues](https://github.com/Alishahryar1/free-claude-code/issues).
-- Keep changes small and covered by focused tests.
-- Do not open Docker integration PRs.
-- Do not open README change PRs just open an issue for it.
-- Run the full check sequence before opening a pull request.
-- The syntax `except X, Y` is brought back in python 3.14 final version (not in 3.14 alpha). Keep in mind before opening PRs.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 ## License
 

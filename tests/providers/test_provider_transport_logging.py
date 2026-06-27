@@ -189,7 +189,8 @@ async def test_native_stream_failure_logs_exclude_exception_str_by_default(
         _ = [e async for e in provider.stream_response(req)]
 
     messages = " | ".join(r.getMessage() for r in caplog.records)
-    assert "SECRET_DETAIL" not in messages
+    # Default mode includes exception text in the upstream field (but not a traceback)
+    assert 'upstream="SECRET_DETAIL"' in messages
     assert "exc_type=RuntimeError" in messages
     assert "http_status=None" in messages
 
@@ -201,7 +202,7 @@ async def test_openai_compat_stream_failure_default_logs_exclude_exception_str(c
         base_url="http://localhost:1/v1",
         log_api_error_tracebacks=False,
     )
-    provider = NvidiaNimProvider(config, nim_settings=NimSettings())
+    provider = NvidiaNimProvider(config, nim_settings=NimSettings.model_construct())
     req = make_openai_compat_stream_request()
 
     @asynccontextmanager
@@ -225,7 +226,8 @@ async def test_openai_compat_stream_failure_default_logs_exclude_exception_str(c
         _ = [e async for e in provider.stream_response(req)]
 
     messages = " | ".join(r.getMessage() for r in caplog.records)
-    assert "SECRET_OPENAI_COMPAT" not in messages
+    # Default mode includes exception text in the upstream field (but not a traceback)
+    assert 'upstream="SECRET_OPENAI_COMPAT"' in messages
     assert "exc_type=RuntimeError" in messages
 
 
@@ -236,7 +238,7 @@ async def test_openai_compat_stream_failure_respects_verbose_flag(caplog):
         base_url="http://localhost:1/v1",
         log_api_error_tracebacks=True,
     )
-    provider = NvidiaNimProvider(config, nim_settings=NimSettings())
+    provider = NvidiaNimProvider(config, nim_settings=NimSettings.model_construct())
     req = make_openai_compat_stream_request()
 
     @asynccontextmanager

@@ -23,7 +23,7 @@ def test_security_headers(client):
     assert "max-age=63072000" in response.headers["Strict-Transport-Security"]
     assert response.headers["Cross-Origin-Opener-Policy"] == "same-origin"
     assert response.headers["Cross-Origin-Resource-Policy"] == "same-origin"
-    assert response.headers["Cross-Origin-Embedder-Policy"] == "require-corp"
+    assert response.headers["Cross-Origin-Embedder-Policy"] == "credentialless"
     assert "accelerometer=()" in response.headers["Permissions-Policy"]
 
     assert "Content-Security-Policy" in response.headers

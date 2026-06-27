@@ -5,6 +5,7 @@ import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import SecretStr
 
 from tests.api.test_app_lifespan_and_errors import _app_settings
 
@@ -14,7 +15,7 @@ async def test_messaging_start_failure_default_logs_exclude_traceback(caplog):
     api_runtime_mod = importlib.import_module("api.runtime")
     settings = _app_settings(
         messaging_platform="telegram",
-        telegram_bot_token="t",
+        telegram_bot_token=SecretStr("t"),
         allowed_telegram_user_id="1",
         discord_bot_token=None,
         allowed_discord_channels=None,

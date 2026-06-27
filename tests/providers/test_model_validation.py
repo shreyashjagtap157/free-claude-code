@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
 from config.nim import NimSettings
 from config.settings import Settings
@@ -29,10 +30,10 @@ def _settings(
     model_opus: str | None = None,
     model_sonnet: str | None = None,
     model_haiku: str | None = None,
-    nvidia_nim_api_key: str = "",
-    open_router_api_key: str = "",
-    deepseek_api_key: str = "",
-    wafer_api_key: str = "",
+    nvidia_nim_api_key: SecretStr = SecretStr(""),
+    open_router_api_key: SecretStr = SecretStr(""),
+    deepseek_api_key: SecretStr = SecretStr(""),
+    wafer_api_key: SecretStr = SecretStr(""),
 ) -> Settings:
     return Settings.model_construct(
         model=model,
@@ -59,7 +60,7 @@ def _response(status_code: int, payload: object) -> httpx.Response:
 async def test_nim_lists_openai_compatible_model_ids() -> None:
     config = ProviderConfig(api_key="test-key")
     with patch("providers.openai_compat.AsyncOpenAI"):
-        provider = NvidiaNimProvider(config, nim_settings=NimSettings())
+        provider = NvidiaNimProvider(config, nim_settings=NimSettings.model_construct())
 
     with patch.object(
         provider._client.models,
@@ -167,6 +168,15 @@ async def test_openrouter_lists_tool_metadata_with_thinking_support() -> None:
                 "data": [
                     {
                         "id": "reasoning-tool-model",
+                        "context_length": 200_000,
+                        "top_provider": {
+                            "max_completion_tokens": 8192,
+                            "context_length": 200_000,
+                        },
+                        "architecture": {
+                            "input_modalities": ["text", "image"],
+                            "modality": "text+image->text",
+                        },
                         "supported_parameters": [
                             "tools",
                             "reasoning",
@@ -175,6 +185,15 @@ async def test_openrouter_lists_tool_metadata_with_thinking_support() -> None:
                     },
                     {
                         "id": "plain-tool-model",
+                        "context_length": 128_000,
+                        "per_request_limits": {
+                            "completion_tokens": 4096,
+                            "prompt_tokens": 128_000,
+                        },
+                        "architecture": {
+                            "input_modalities": ["text"],
+                            "modality": "text->text",
+                        },
                         "supported_parameters": ["tool_choice", "include_reasoning"],
                     },
                     {
@@ -189,8 +208,20 @@ async def test_openrouter_lists_tool_metadata_with_thinking_support() -> None:
 
     assert infos == frozenset(
         {
-            ProviderModelInfo("reasoning-tool-model", supports_thinking=True),
-            ProviderModelInfo("plain-tool-model", supports_thinking=False),
+            ProviderModelInfo(
+                "reasoning-tool-model",
+                supports_thinking=True,
+                context_window=200_000,
+                max_output_tokens=8192,
+                supports_vision=True,
+            ),
+            ProviderModelInfo(
+                "plain-tool-model",
+                supports_thinking=False,
+                context_window=128_000,
+                max_output_tokens=4096,
+                supports_vision=False,
+            ),
         }
     )
 
@@ -238,21 +269,23 @@ async def test_ollama_lists_native_tag_model_ids() -> None:
     provider = OllamaProvider(
         ProviderConfig(api_key="ollama", base_url="http://localhost:11434")
     )
+    mock_resp = _response(
+        200,
+        {
+            "models": [
+                {"name": "llama3.1:latest", "model": "llama3.1:latest"},
+                {"name": "qwen3"},
+            ]
+        },
+    )
     with (
-        patch("httpx.AsyncClient") as mock_client_cls,
+        patch.object(
+            provider,
+            "_send_model_list_request",
+            new_callable=AsyncMock,
+            return_value=mock_resp,
+        ),
     ):
-        mock_client = mock_client_cls.return_value.__aenter__.return_value
-        mock_client.get = AsyncMock(
-            return_value=_response(
-                200,
-                {
-                    "models": [
-                        {"name": "llama3.1:latest", "model": "llama3.1:latest"},
-                        {"name": "qwen3"},
-                    ]
-                },
-            )
-        )
         assert await provider.list_model_ids() == frozenset(
             {"llama3.1:latest", "qwen3"}
         )
@@ -444,7 +477,7 @@ async def test_registry_refresh_model_list_cache_uses_configured_remote_keys_and
     )
     settings = _settings(
         model="lmstudio/local-qwen",
-        open_router_api_key="open-router-key",
+        open_router_api_key=SecretStr("open-router-key"),
     )
 
     await registry.refresh_model_list_cache(settings)
@@ -463,7 +496,7 @@ async def test_registry_refresh_model_list_cache_keeps_prior_cache_on_failure() 
     registry.cache_model_ids("nvidia_nim", {"cached-model"})
     settings = _settings(
         model="nvidia_nim/cached-model",
-        nvidia_nim_api_key="nim-key",
+        nvidia_nim_api_key=SecretStr("nim-key"),
     )
 
     await registry.refresh_model_list_cache(settings)

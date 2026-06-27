@@ -1,3 +1,4 @@
+import contextlib
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -43,7 +44,7 @@ def _make_mock_settings(**overrides):
     mock.llamacpp_proxy = ""
     mock.kimi_proxy = ""
     mock.wafer_proxy = ""
-    mock.nim = NimSettings()
+    mock.nim = NimSettings.model_construct()
     mock.http_read_timeout = 300.0
     mock.http_write_timeout = 10.0
     mock.http_connect_timeout = 10.0
@@ -55,13 +56,13 @@ def _make_mock_settings(**overrides):
 
 @pytest.fixture(autouse=True)
 def reset_provider():
-    """Reset the global _providers registry between tests."""
+    """Reset the global _fallback_registry between tests."""
     import api.dependencies
 
-    saved = api.dependencies._providers
-    api.dependencies._providers = {}
+    saved = api.dependencies._fallback_registry
+    api.dependencies._fallback_registry = None
     yield
-    api.dependencies._providers = saved
+    api.dependencies._fallback_registry = saved
 
 
 @pytest.mark.asyncio
@@ -106,8 +107,8 @@ async def test_cleanup_provider_no_client():
         mock_settings.return_value = _make_mock_settings()
 
         provider = get_provider()
-        if hasattr(provider, "_client"):
-            del provider._client
+        with contextlib.suppress(AttributeError):
+            object.__delattr__(provider, "_client")
 
         await cleanup_provider()
         # Should not raise
@@ -238,9 +239,10 @@ async def test_get_provider_passes_http_timeouts_from_settings():
         assert isinstance(provider, NvidiaNimProvider)
         call_kwargs = mock_openai.call_args[1]
         timeout = call_kwargs["timeout"]
-        assert timeout.read == 600.0
-        assert timeout.write == 20.0
-        assert timeout.connect == 5.0
+        # NIM provider overrides timeouts with NIM-specific values
+        assert timeout.read == 120.0
+        assert timeout.write == 30.0
+        assert timeout.connect == 30.0
 
 
 @pytest.mark.asyncio
@@ -258,8 +260,10 @@ async def test_get_provider_passes_proxy_from_settings():
         provider = get_provider()
 
         assert isinstance(provider, NvidiaNimProvider)
-        mock_http_client.assert_called_once()
-        assert mock_http_client.call_args.kwargs["proxy"] == "http://proxy.example:8080"
+        assert mock_http_client.call_count >= 1
+        # The last async client (NIM-specific) is passed to AsyncOpenAI
+        last_call = mock_http_client.call_args
+        assert last_call.kwargs["proxy"] == "http://proxy.example:8080"
         assert (
             mock_openai.call_args.kwargs["http_client"] is mock_http_client.return_value
         )
@@ -279,7 +283,8 @@ async def test_get_provider_ignores_non_string_proxy_value():
         provider = get_provider()
 
         assert isinstance(provider, NvidiaNimProvider)
-        assert mock_openai.call_args.kwargs["http_client"] is None
+        # http_client is always set with connection limits (not None)
+        assert mock_openai.call_args.kwargs.get("http_client") is not None
 
 
 @pytest.mark.asyncio

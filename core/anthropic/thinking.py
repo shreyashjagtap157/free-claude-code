@@ -2,10 +2,10 @@
 
 from collections.abc import Iterator
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class ContentType(Enum):
+class ContentType(StrEnum):
     """Type of content chunk."""
 
     TEXT = "text"

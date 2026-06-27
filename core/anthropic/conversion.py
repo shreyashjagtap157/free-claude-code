@@ -564,7 +564,7 @@ def build_base_request_body(
     )
 
     system = getattr(request_data, "system", None)
-    if system:
+    if system and not any(msg.get("role") == "system" for msg in messages):
         system_msg = AnthropicToOpenAIConverter.convert_system_prompt(system)
         if system_msg:
             messages.insert(0, system_msg)
@@ -589,7 +589,12 @@ def build_base_request_body(
             tool_choice
         )
 
+    # Anthropic API puts effort inside output_config; also accept top-level effort.
     effort = getattr(request_data, "effort", None)
+    if not effort:
+        output_config = getattr(request_data, "output_config", None)
+        if isinstance(output_config, dict):
+            effort = output_config.get("effort")
     if effort:
         body["reasoning_effort"] = effort
 

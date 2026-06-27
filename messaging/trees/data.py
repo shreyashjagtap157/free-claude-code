@@ -4,7 +4,7 @@ Contains MessageState, MessageNode, and MessageTree classes.
 """
 
 import asyncio
-from collections import deque
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -17,40 +17,35 @@ from ..models import IncomingMessage
 
 
 class _SnapshotQueue:
-    """Queue with snapshot/remove helpers, backed by a deque and a set index."""
+    """Queue with snapshot/remove helpers, backed by an OrderedDict for O(1) operations."""
 
     def __init__(self) -> None:
-        self._deque: deque[str] = deque()
-        self._set: set[str] = set()
+        self._data: OrderedDict[str, None] = OrderedDict()
 
     async def put(self, item: str) -> None:
-        self._deque.append(item)
-        self._set.add(item)
+        self._data[item] = None
 
     def put_nowait(self, item: str) -> None:
-        self._deque.append(item)
-        self._set.add(item)
+        self._data[item] = None
 
     def get_nowait(self) -> str:
-        if not self._deque:
+        if not self._data:
             raise asyncio.QueueEmpty()
-        item = self._deque.popleft()
-        self._set.discard(item)
+        item, _ = self._data.popitem(last=False)
         return item
 
     def qsize(self) -> int:
-        return len(self._deque)
+        return len(self._data)
 
     def get_snapshot(self) -> list[str]:
         """Return current queue contents in FIFO order (read-only copy)."""
-        return list(self._deque)
+        return list(self._data)
 
     def remove_if_present(self, item: str) -> bool:
-        """Remove item from queue if present (O(1) membership check). Returns True if removed."""
-        if item not in self._set:
+        """Remove item from queue if present (O(1)). Returns True if removed."""
+        if item not in self._data:
             return False
-        self._set.discard(item)
-        self._deque = deque(x for x in self._deque if x != item)
+        del self._data[item]
         return True
 
 

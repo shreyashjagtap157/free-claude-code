@@ -49,6 +49,7 @@ PROVIDER_SMOKE_DEFAULT_MODELS: dict[str, str] = {
     "llamacpp": "llamacpp/local-model",
     "ollama": "ollama/llama3.1",
     "wafer": "wafer/DeepSeek-V4-Pro",
+    "google": "google/gemini-2.0-flash",
 }
 
 NVIDIA_NIM_CLI_DEFAULT_MODELS: tuple[str, ...] = (
@@ -218,11 +219,11 @@ class SmokeConfig:
 
     def has_provider_configuration(self, provider: str) -> bool:
         if provider == "nvidia_nim":
-            return bool(self.settings.nvidia_nim_api_key.strip())
+            return bool(self.settings.nvidia_nim_api_key.get_secret_value().strip())
         if provider == "open_router":
-            return bool(self.settings.open_router_api_key.strip())
+            return bool(self.settings.open_router_api_key.get_secret_value().strip())
         if provider == "deepseek":
-            return bool(self.settings.deepseek_api_key.strip())
+            return bool(self.settings.deepseek_api_key.get_secret_value().strip())
         if provider == "lmstudio":
             return bool(self.settings.lm_studio_base_url.strip())
         if provider == "llamacpp":
@@ -230,7 +231,9 @@ class SmokeConfig:
         if provider == "ollama":
             return bool(self.settings.ollama_base_url.strip())
         if provider == "wafer":
-            return bool(self.settings.wafer_api_key.strip())
+            return bool(self.settings.wafer_api_key.get_secret_value().strip())
+        if provider == "google":
+            return bool(self.settings.google_api_key.get_secret_value().strip())
         return False
 
 
@@ -352,7 +355,9 @@ def openrouter_free_cli_model_refs(
 
 def auth_headers(token: str | None = None) -> dict[str, str]:
     settings = get_settings()
-    resolved = token if token is not None else settings.anthropic_auth_token
+    resolved = (
+        token if token is not None else settings.anthropic_auth_token.get_secret_value()
+    )
     headers = {
         "anthropic-version": "2023-06-01",
         "content-type": "application/json",

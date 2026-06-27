@@ -13,7 +13,7 @@ from config.constants import (
     ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS,
     NATIVE_MESSAGES_ERROR_BODY_LOG_CAP_BYTES,
 )
-from core.anthropic import iter_provider_stream_error_sse_events
+from core.anthropic import interleave_keepalive, iter_provider_stream_error_sse_events
 from core.anthropic.emitted_sse_tracker import EmittedNativeSseTracker
 from core.anthropic.native_messages_request import (
     build_base_native_anthropic_request_body,
@@ -83,12 +83,16 @@ class AnthropicMessagesTransport(BaseProvider):
         )
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
-            proxy=config.proxy or None,
+            proxy=config.proxy,
             timeout=httpx.Timeout(
                 config.http_read_timeout,
                 connect=config.http_connect_timeout,
                 read=config.http_read_timeout,
                 write=config.http_write_timeout,
+            ),
+            limits=httpx.Limits(
+                max_connections=config.max_connections,
+                max_keepalive_connections=config.max_keepalive_connections,
             ),
         )
 
@@ -388,10 +392,13 @@ class AnthropicMessagesTransport(BaseProvider):
                 chunk_count = 0
                 chunk_bytes = 0
 
-                async for chunk in self._iter_stream_chunks(
-                    response,
-                    state=state,
-                    thinking_enabled=thinking_enabled,
+                assert response is not None
+                async for chunk in interleave_keepalive(
+                    self._iter_stream_chunks(
+                        response,
+                        state=state,
+                        thinking_enabled=thinking_enabled,
+                    ),
                 ):
                     chunk_count += 1
                     chunk_bytes += len(chunk.encode("utf-8", errors="replace"))

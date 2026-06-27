@@ -6,12 +6,13 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
+import httpx
 import uvicorn
+from loguru import logger
 
 from api.admin_urls import local_proxy_root_url
 from api.app import GracefulLifespanApp, create_app
@@ -25,7 +26,7 @@ from config.settings import Settings, get_settings
 
 PROXY_PREFLIGHT_PATH = "/health"
 PROXY_PREFLIGHT_TIMEOUT_SECONDS = 1.5
-SERVER_GRACEFUL_SHUTDOWN_SECONDS = 5
+SERVER_GRACEFUL_SHUTDOWN_SECONDS = 2
 
 
 def _load_env_template() -> str:
@@ -45,15 +46,36 @@ def _load_env_template() -> str:
 
 def serve() -> None:
     """Start the FastAPI server (registered as `fcc-server` script)."""
+    # Backoff parameters for crash-loop prevention
+    backoff = 0.5  # start with half-second delay
+    max_backoff = 30.0  # cap backoff at 30 seconds
     try:
-        try:
-            while True:
-                settings = get_settings()
-                if not _run_supervised_server(settings):
+        # Outer loop restarts the server after normal admin-requested restarts
+        while True:
+            settings = get_settings()
+            try:
+                # Run one server instance; returns True if admin requested restart
+                restart_requested = _run_supervised_server(settings)
+                # Normal exit (admin did not request restart) - exit the supervisor
+                if not restart_requested:
                     return
+                # Admin-requested restart: reset backoff and continue immediately
+                backoff = 0.5
+                # Clear cached settings to pick up any changes
                 get_settings.cache_clear()
-        except KeyboardInterrupt:
-            return
+            except Exception:
+                # Unexpected crash - log and apply exponential backoff before retrying
+                logger.exception(
+                    "Server crashed unexpectedly; restarting after backoff"
+                )
+                sleep_time = min(backoff, max_backoff)
+                logger.info(f"Waiting {sleep_time:.1f}s before server restart")
+                time.sleep(sleep_time)
+                backoff = min(max_backoff, backoff * 2)
+                # Continue loop to attempt restart
+                continue
+    except KeyboardInterrupt:
+        return
     finally:
         kill_all_best_effort()
 
@@ -116,7 +138,7 @@ def _claude_child_env(
     }
     env["ANTHROPIC_BASE_URL"] = local_proxy_root_url(settings)
     env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] = "1"
-    if token := settings.anthropic_auth_token.strip():
+    if token := settings.anthropic_auth_token.get_secret_value().strip():
         env["ANTHROPIC_AUTH_TOKEN"] = token
     return env
 
@@ -125,19 +147,17 @@ def _preflight_proxy(proxy_root_url: str) -> str | None:
     """Return an error message when the local proxy health check is unreachable."""
 
     url = f"{proxy_root_url.rstrip('/')}{PROXY_PREFLIGHT_PATH}"
-    request = Request(url, method="GET")
     try:
-        with urlopen(request, timeout=PROXY_PREFLIGHT_TIMEOUT_SECONDS) as response:
-            status_code = response.getcode()
-    except HTTPError as exc:
-        return f"returned HTTP {exc.code}"
-    except URLError as exc:
-        return str(exc.reason)
+        with httpx.Client(timeout=PROXY_PREFLIGHT_TIMEOUT_SECONDS) as client:
+            response = client.get(url)
+            if not 200 <= response.status_code < 300:
+                return f"returned HTTP {response.status_code}"
+    except httpx.ConnectError:
+        return "Connection refused"
+    except httpx.TimeoutException:
+        return "Timed out"
     except OSError as exc:
         return str(exc)
-
-    if not 200 <= status_code < 300:
-        return f"returned HTTP {status_code}"
     return None
 
 
@@ -195,3 +215,42 @@ def launch_claude(argv: Sequence[str] | None = None) -> None:
             unregister_pid(process.pid)
 
     raise SystemExit(return_code)
+
+
+def completions() -> None:
+    """Print shell completion script for fcc-* commands.
+
+    Usage:
+        eval "$(fcc-completions)"       # bash
+        eval "$(fcc-completions)"      # zsh
+    """
+    shell = os.environ.get("SHELL", "")
+    if "zsh" in shell:
+        script = """#compdef fcc-server fcc-init fcc-claude fcc-completions
+_fcc_claude_commands() {
+  local -a commands
+  commands=(
+    "server:Start the proxy server"
+    "init:Initialize .env configuration"
+    "claude:Launch Claude Code CLI"
+    "completions:Print shell completion"
+  )
+  _describe 'command' commands
+}
+compdef _fcc_claude_commands fcc-server fcc-init fcc-claude fcc-completions
+"""
+    else:
+        script = """_fcc_claude_commands() {
+  local cur="$2"
+  case "$cur" in
+    -*)
+      COMPREPLY=()
+      ;;
+    *)
+      COMPREPLY=( $(compgen -W "server init claude completions" -- "$cur") )
+      ;;
+  esac
+}
+complete -F _fcc_claude_commands fcc-server fcc-init fcc-claude fcc-completions
+"""
+    print(script)

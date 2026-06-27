@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 from collections.abc import MutableMapping
 from types import SimpleNamespace
@@ -7,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from config.settings import Settings
 from providers.exceptions import ServiceUnavailableError
@@ -17,7 +19,7 @@ _RUNTIME_EXTRAS = {
     "whisper_model": "base",
     "whisper_device": "cpu",
     "hf_token": "",
-    "nvidia_nim_api_key": "",
+    "nvidia_nim_api_key": SecretStr(""),
     "claude_cli_bin": "claude",
     "uses_process_anthropic_auth_token": lambda: False,
     "messaging_rate_limit": 1,
@@ -30,7 +32,12 @@ _RUNTIME_EXTRAS = {
     "log_raw_cli_diagnostics": False,
     "log_messaging_error_details": False,
     "configured_chat_model_refs": lambda: (),
-    "anthropic_auth_token": "",
+    "anthropic_auth_token": SecretStr(""),
+    "allowed_discord_channels": None,
+    "google_base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "auto_compact_enabled": True,
+    "auto_compact_threshold": 0.75,
+    "auto_compact_context_window": 200_000,
 }
 
 
@@ -229,7 +236,7 @@ def test_app_lifespan_sets_state_and_cleans_up(tmp_path, messaging_enabled):
 
     settings = _app_settings(
         messaging_platform="telegram",
-        telegram_bot_token="token" if messaging_enabled else None,
+        telegram_bot_token=SecretStr("token") if messaging_enabled else None,
         allowed_telegram_user_id="123",
         discord_bot_token=None,
         allowed_discord_channels=None,
@@ -308,10 +315,9 @@ def test_app_lifespan_cleanup_continues_if_platform_stop_raises(tmp_path):
 
     settings = _app_settings(
         messaging_platform="telegram",
-        telegram_bot_token="token",
+        telegram_bot_token=SecretStr("token"),
         allowed_telegram_user_id="123",
         discord_bot_token=None,
-        allowed_discord_channels=None,
         allowed_dir=str(tmp_path / "workspace"),
         claude_workspace=str(tmp_path / "data"),
         host="127.0.0.1",
@@ -387,6 +393,7 @@ async def test_runtime_startup_validation_failure_does_not_block_server(tmp_path
         ) as create_platform,
     ):
         await runtime.startup()
+        await asyncio.sleep(0)
         await runtime.shutdown()
 
     validation.assert_awaited_once_with(settings)
@@ -540,10 +547,9 @@ def test_app_lifespan_flush_pending_save_exception_warning_only(tmp_path):
 
     settings = _app_settings(
         messaging_platform="telegram",
-        telegram_bot_token="token",
+        telegram_bot_token=SecretStr("token"),
         allowed_telegram_user_id="123",
         discord_bot_token=None,
-        allowed_discord_channels=None,
         allowed_dir=str(tmp_path / "workspace"),
         claude_workspace=str(tmp_path / "data"),
         host="127.0.0.1",

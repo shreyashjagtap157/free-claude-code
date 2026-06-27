@@ -4,6 +4,7 @@ import os
 import subprocess
 
 import pytest
+from pydantic import SecretStr
 
 from config.settings import Settings
 from messaging.platforms.factory import create_messaging_platform
@@ -29,7 +30,7 @@ def test_env_precedence_e2e(smoke_config: SmokeConfig, tmp_path) -> None:
     script = (
         "from config.settings import get_settings; "
         "s=get_settings(); "
-        "print(s.model); print(s.anthropic_auth_token)"
+        "print(s.model); print(s.anthropic_auth_token.get_secret_value())"
     )
     result = subprocess.run(
         cmd_python_c(script),
@@ -139,9 +140,9 @@ def test_proxy_timeout_config_e2e(smoke_config: SmokeConfig, tmp_path) -> None:
 @pytest.mark.smoke_target("extensibility")
 def test_provider_registry_e2e() -> None:
     settings = Settings(
-        open_router_api_key="openrouter-key",
-        deepseek_api_key="deepseek-key",
-        nvidia_nim_api_key="nim-key",
+        open_router_api_key=SecretStr("openrouter-key"),
+        deepseek_api_key=SecretStr("deepseek-key"),
+        nvidia_nim_api_key=SecretStr("nim-key"),
         lm_studio_base_url="http://localhost:1234/v1",
         llamacpp_base_url="http://localhost:8080/v1",
     )

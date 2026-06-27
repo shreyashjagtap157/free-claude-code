@@ -1,0 +1,42 @@
+version: "3.9"
+
+services:
+  proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: free-claude-code
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount .env for configuration
+      - ./.env:/app/.env:ro
+      # Persist session data (messaging platforms)
+      - ./data:/data
+    environment:
+      - FCC_HOST=0.0.0.0
+      - FCC_PORT=8080
+      - ALLOWED_DIR=/app
+      # Override .env values with these if needed:
+      # - NVIDIA_NIM_API_KEY=${NVIDIA_NIM_API_KEY}
+      # - ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "uv", "run", "python", "-c", "import httpx; httpx.get('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Optional: Redis for distributed rate limiting and session caching
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: fcc-redis
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis-data:/data
+  #   restart: unless-stopped
+
+# volumes:
+#   redis-data:

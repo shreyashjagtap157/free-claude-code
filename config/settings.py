@@ -3,17 +3,24 @@
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from dotenv import dotenv_values
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .constants import HTTP_CONNECT_TIMEOUT_DEFAULT
 from .nim import NimSettings
 from .provider_ids import SUPPORTED_PROVIDER_IDS
+
+
+class MessagingPlatform(StrEnum):
+    TELEGRAM = "telegram"
+    DISCORD = "discord"
+    NONE = "none"
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,21 +116,37 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     # ==================== OpenRouter Config ====================
-    open_router_api_key: str = Field(default="", validation_alias="OPENROUTER_API_KEY")
+    open_router_api_key: SecretStr = Field(
+        default=SecretStr(""), validation_alias="OPENROUTER_API_KEY"
+    )
 
     # ==================== DeepSeek Config ====================
-    deepseek_api_key: str = Field(default="", validation_alias="DEEPSEEK_API_KEY")
+    deepseek_api_key: SecretStr = Field(
+        default=SecretStr(""), validation_alias="DEEPSEEK_API_KEY"
+    )
+    deepseek_base_url: str = Field(
+        default="https://api.deepseek.com/anthropic",
+        validation_alias="DEEPSEEK_BASE_URL",
+    )
 
     # ==================== Kimi Config ====================
-    kimi_api_key: str = Field(default="", validation_alias="KIMI_API_KEY")
+    kimi_api_key: SecretStr = Field(
+        default=SecretStr(""), validation_alias="KIMI_API_KEY"
+    )
 
     # ==================== Wafer Config ====================
-    wafer_api_key: str = Field(default="", validation_alias="WAFER_API_KEY")
+    wafer_api_key: SecretStr = Field(
+        default=SecretStr(""), validation_alias="WAFER_API_KEY"
+    )
+
+    # ==================== Google AI Studio Config ====================
+    google_api_key: SecretStr = Field(
+        default=SecretStr(""), validation_alias="GOOGLE_API_KEY"
+    )
 
     # ==================== Messaging Platform Selection ====================
-    # Valid: "telegram" | "discord" | "none"
-    messaging_platform: str = Field(
-        default="discord", validation_alias="MESSAGING_PLATFORM"
+    messaging_platform: MessagingPlatform = Field(
+        default=MessagingPlatform.NONE, validation_alias="MESSAGING_PLATFORM"
     )
     messaging_rate_limit: int = Field(
         default=1, validation_alias="MESSAGING_RATE_LIMIT"
@@ -133,7 +156,7 @@ class Settings(BaseSettings):
     )
 
     # ==================== NVIDIA NIM Config ====================
-    nvidia_nim_api_key: str = ""
+    nvidia_nim_api_key: SecretStr = SecretStr("")
 
     # ==================== LM Studio Config ====================
     lm_studio_base_url: str = Field(
@@ -165,12 +188,22 @@ class Settings(BaseSettings):
     model_haiku: str | None = Field(default=None, validation_alias="MODEL_HAIKU")
 
     # ==================== Per-Provider Proxy ====================
-    nvidia_nim_proxy: str = Field(default="", validation_alias="NVIDIA_NIM_PROXY")
-    open_router_proxy: str = Field(default="", validation_alias="OPENROUTER_PROXY")
-    lmstudio_proxy: str = Field(default="", validation_alias="LMSTUDIO_PROXY")
-    llamacpp_proxy: str = Field(default="", validation_alias="LLAMACPP_PROXY")
-    kimi_proxy: str = Field(default="", validation_alias="KIMI_PROXY")
-    wafer_proxy: str = Field(default="", validation_alias="WAFER_PROXY")
+    nvidia_nim_proxy: str | None = Field(
+        default=None, validation_alias="NVIDIA_NIM_PROXY"
+    )
+    open_router_proxy: str | None = Field(
+        default=None, validation_alias="OPENROUTER_PROXY"
+    )
+    lmstudio_proxy: str | None = Field(default=None, validation_alias="LMSTUDIO_PROXY")
+    llamacpp_proxy: str | None = Field(default=None, validation_alias="LLAMACPP_PROXY")
+    deepseek_proxy: str | None = Field(default=None, validation_alias="DEEPSEEK_PROXY")
+    kimi_proxy: str | None = Field(default=None, validation_alias="KIMI_PROXY")
+    wafer_proxy: str | None = Field(default=None, validation_alias="WAFER_PROXY")
+    google_proxy: str | None = Field(default=None, validation_alias="GOOGLE_PROXY")
+    google_base_url: str = Field(
+        default="https://generativelanguage.googleapis.com/v1beta/openai",
+        validation_alias="GOOGLE_BASE_URL",
+    )
 
     # ==================== Provider Rate Limiting ====================
     provider_rate_limit: int = Field(default=40, validation_alias="PROVIDER_RATE_LIMIT")
@@ -178,7 +211,13 @@ class Settings(BaseSettings):
         default=60, validation_alias="PROVIDER_RATE_WINDOW"
     )
     provider_max_concurrency: int = Field(
-        default=5, validation_alias="PROVIDER_MAX_CONCURRENCY"
+        default=3, validation_alias="PROVIDER_MAX_CONCURRENCY"
+    )
+    provider_max_connections: int = Field(
+        default=50, validation_alias="PROVIDER_MAX_CONNECTIONS"
+    )
+    provider_max_keepalive_connections: int = Field(
+        default=20, validation_alias="PROVIDER_MAX_KEEPALIVE_CONNECTIONS"
     )
     enable_model_thinking: bool = Field(
         default=True, validation_alias="ENABLE_MODEL_THINKING"
@@ -269,7 +308,7 @@ class Settings(BaseSettings):
     )
 
     # ==================== NIM Settings ====================
-    nim: NimSettings = Field(default_factory=NimSettings)
+    nim: NimSettings = Field(default_factory=NimSettings.model_construct)
 
     # ==================== Voice Note Transcription ====================
     voice_note_enabled: bool = Field(
@@ -286,10 +325,21 @@ class Settings(BaseSettings):
     # Hugging Face token for faster model downloads (optional, for local Whisper)
     hf_token: str = Field(default="", validation_alias="HF_TOKEN")
 
+    # ==================== Auto-Compact ====================
+    auto_compact_enabled: bool = Field(
+        default=True, validation_alias="AUTO_COMPACT_ENABLED"
+    )
+    auto_compact_threshold: float = Field(
+        default=0.75, validation_alias="AUTO_COMPACT_THRESHOLD"
+    )
+    auto_compact_context_window: int = Field(
+        default=200_000, validation_alias="AUTO_COMPACT_CONTEXT_WINDOW"
+    )
+
     # ==================== Bot Wrapper Config ====================
-    telegram_bot_token: str | None = None
+    telegram_bot_token: SecretStr | None = None
     allowed_telegram_user_id: str | None = None
-    discord_bot_token: str | None = Field(
+    discord_bot_token: SecretStr | None = Field(
         default=None, validation_alias="DISCORD_BOT_TOKEN"
     )
     allowed_discord_channels: str | None = Field(
@@ -308,8 +358,8 @@ class Settings(BaseSettings):
     log_file: str = "server.log"
     # Optional server API key to protect endpoints (Anthropic-style)
     # Set via env `ANTHROPIC_AUTH_TOKEN`. When empty, no auth is required.
-    anthropic_auth_token: str = Field(
-        default="", validation_alias="ANTHROPIC_AUTH_TOKEN"
+    anthropic_auth_token: SecretStr = Field(
+        default=SecretStr(""), validation_alias="ANTHROPIC_AUTH_TOKEN"
     )
 
     @model_validator(mode="before")
@@ -353,15 +403,6 @@ class Settings(BaseSettings):
         if v not in ("cpu", "cuda", "nvidia_nim"):
             raise ValueError(
                 f"whisper_device must be 'cpu', 'cuda', or 'nvidia_nim', got {v!r}"
-            )
-        return v
-
-    @field_validator("messaging_platform")
-    @classmethod
-    def validate_messaging_platform(cls, v: str) -> str:
-        if v not in ("telegram", "discord", "none"):
-            raise ValueError(
-                f"messaging_platform must be 'telegram', 'discord', or 'none', got {v!r}"
             )
         return v
 
@@ -424,7 +465,7 @@ class Settings(BaseSettings):
         if (
             self.voice_note_enabled
             and self.whisper_device == "nvidia_nim"
-            and not self.nvidia_nim_api_key.strip()
+            and not self.nvidia_nim_api_key.get_secret_value().strip()
         ):
             raise ValueError(
                 "NVIDIA_NIM_API_KEY is required when WHISPER_DEVICE is 'nvidia_nim'. "
@@ -437,7 +478,7 @@ class Settings(BaseSettings):
         """Let explicit .env auth config override stale shell/client tokens."""
         dotenv_value = _env_file_override(self.model_config, "ANTHROPIC_AUTH_TOKEN")
         if dotenv_value is not None:
-            self.anthropic_auth_token = dotenv_value
+            self.anthropic_auth_token = SecretStr(dotenv_value)
         return self
 
     def uses_process_anthropic_auth_token(self) -> bool:

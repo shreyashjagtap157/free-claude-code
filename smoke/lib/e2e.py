@@ -209,7 +209,7 @@ class ClientProtocolDriver:
     @staticmethod
     def jetbrains_headers(config: SmokeConfig) -> dict[str, str]:
         headers = auth_headers()
-        token = config.settings.anthropic_auth_token
+        token = config.settings.anthropic_auth_token.get_secret_value()
         if token:
             headers.pop("x-api-key", None)
             headers["authorization"] = f"Bearer {token}"
@@ -282,8 +282,10 @@ class ClientProtocolDriver:
         env["ANTHROPIC_BASE_URL"] = server.base_url
         env["ANTHROPIC_API_URL"] = f"{server.base_url}/v1"
         env.setdefault("ANTHROPIC_API_KEY", "sk-smoke-proxy")
-        if config.settings.anthropic_auth_token:
-            env["ANTHROPIC_AUTH_TOKEN"] = config.settings.anthropic_auth_token
+        if config.settings.anthropic_auth_token.get_secret_value():
+            env["ANTHROPIC_AUTH_TOKEN"] = (
+                config.settings.anthropic_auth_token.get_secret_value()
+            )
         return subprocess.run(
             [
                 claude_bin,
@@ -422,6 +424,7 @@ class FakePlatform(MessagingPlatform):
         self,
         chat_id: str,
         message_ids: Sequence[str],
+        *,
         fire_and_forget: bool = True,
     ) -> None:
         for message_id in message_ids:
@@ -446,6 +449,24 @@ class FakeCLISession:
         self.events = events
         self.calls: list[dict[str, Any]] = []
         self.is_busy = False
+        self._accumulated_tokens = 0
+
+    @property
+    def accumulated_tokens(self) -> int:
+        return self._accumulated_tokens
+
+    @property
+    def context_window(self) -> int:
+        return 200000
+
+    def update_accumulated_tokens(
+        self, prompt: str, prompt_tokens: int | None = None
+    ) -> None:
+        if prompt_tokens is not None:
+            self._accumulated_tokens = prompt_tokens
+
+    def prepare_auto_compact_prompt(self, prompt: str) -> tuple[str, bool]:
+        return prompt, False
 
     async def start_task(
         self, prompt: str, session_id: str | None = None, fork_session: bool = False

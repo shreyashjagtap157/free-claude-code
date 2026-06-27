@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
 from dataclasses import dataclass
@@ -26,9 +27,10 @@ def _port_for_url(parsed) -> int:
     return 443 if (parsed.scheme or "").lower() == "https" else 80
 
 
-def _stream_getaddrinfo_or_raise(host: str, port: int) -> list[tuple]:
+async def _stream_getaddrinfo_or_raise(host: str, port: int) -> list[tuple]:
     try:
-        return socket.getaddrinfo(
+        loop = asyncio.get_running_loop()
+        return await loop.getaddrinfo(
             host, port, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP
         )
     except OSError as exc:
@@ -37,7 +39,7 @@ def _stream_getaddrinfo_or_raise(host: str, port: int) -> list[tuple]:
         ) from exc
 
 
-def get_validated_stream_addrinfos_for_egress(
+async def get_validated_stream_addrinfos_for_egress(
     url: str, policy: WebFetchEgressPolicy
 ) -> list[tuple]:
     """Resolve and validate a URL for web_fetch, returning getaddrinfo rows for pinning.
@@ -60,7 +62,7 @@ def get_validated_stream_addrinfos_for_egress(
     port = _port_for_url(parsed)
 
     if policy.allow_private_network_targets:
-        return _stream_getaddrinfo_or_raise(host, port)
+        return await _stream_getaddrinfo_or_raise(host, port)
 
     host_lower = host.lower()
     if host_lower == "localhost" or host_lower.endswith(".localhost"):
@@ -78,9 +80,9 @@ def get_validated_stream_addrinfos_for_egress(
             raise WebFetchEgressViolation(
                 f"Non-public IP host {host!r} is not allowed for web_fetch"
             )
-        return _stream_getaddrinfo_or_raise(host, port)
+        return await _stream_getaddrinfo_or_raise(host, port)
 
-    infos = _stream_getaddrinfo_or_raise(host, port)
+    infos = await _stream_getaddrinfo_or_raise(host, port)
     for *_, sockaddr in infos:
         addr = sockaddr[0]
         try:
@@ -94,6 +96,6 @@ def get_validated_stream_addrinfos_for_egress(
     return infos
 
 
-def enforce_web_fetch_egress(url: str, policy: WebFetchEgressPolicy) -> None:
+async def enforce_web_fetch_egress(url: str, policy: WebFetchEgressPolicy) -> None:
     """Validate ``url`` (scheme, host, and resolved addresses) for web_fetch."""
-    get_validated_stream_addrinfos_for_egress(url, policy)
+    await get_validated_stream_addrinfos_for_egress(url, policy)

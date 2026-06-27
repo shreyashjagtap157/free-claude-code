@@ -458,6 +458,43 @@ class TestProviderRateLimiter:
         assert limiter._concurrency_sem._value == 3
 
     @pytest.mark.asyncio
+    async def test_set_blocked_from_response_uses_retry_after(self):
+        """set_blocked_from_response with Retry-After header uses its value."""
+        from httpx import Request, Response
+
+        limiter = GlobalRateLimiter.get_instance(rate_limit=100, rate_window=60)
+        resp = Response(
+            429, request=Request("POST", "http://x"), headers={"Retry-After": "15"}
+        )
+        limiter.set_blocked_from_response(60, response=resp)
+        remaining = limiter.remaining_wait()
+        # Should be ~15s, not 60s
+        assert 14.0 < remaining <= 15.1, f"Expected ~15s, got {remaining:.2f}s"
+
+    @pytest.mark.asyncio
+    async def test_set_blocked_from_response_falls_back_when_no_header(self):
+        """set_blocked_from_response without Retry-After uses default seconds."""
+        limiter = GlobalRateLimiter.get_instance(rate_limit=100, rate_window=60)
+        limiter.set_blocked_from_response(30, response=None)
+        remaining = limiter.remaining_wait()
+        assert 29.0 < remaining <= 30.1, f"Expected ~30s, got {remaining:.2f}s"
+
+    @pytest.mark.asyncio
+    async def test_set_blocked_from_response_invalid_header_falls_back(self):
+        """set_blocked_from_response with unparseable Retry-After uses default."""
+        from httpx import Request, Response
+
+        limiter = GlobalRateLimiter.get_instance(rate_limit=100, rate_window=60)
+        resp = Response(
+            429,
+            request=Request("POST", "http://x"),
+            headers={"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"},
+        )
+        limiter.set_blocked_from_response(60, response=resp)
+        remaining = limiter.remaining_wait()
+        assert 59.0 < remaining <= 60.1, f"Expected ~60s, got {remaining:.2f}s"
+
+    @pytest.mark.asyncio
     async def test_scoped_instances_are_isolated(self):
         """Provider-scoped limiters do not share reactive block state."""
         GlobalRateLimiter.reset_instance()

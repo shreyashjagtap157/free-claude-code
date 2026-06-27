@@ -372,6 +372,10 @@ class ClaudeMessageHandler:
         async def update_ui(status: str | None = None, force: bool = False) -> None:
             await editor.update(status, force=force)
 
+        # Sentinel for auto-compact token tracking (available in finally block)
+        cli_session = None
+        prompt_text = incoming.text
+
         try:
             try:
                 (
@@ -434,8 +438,33 @@ class ClaudeMessageHandler:
                 )
                 return
 
+            # Auto-compact: check accumulated token usage and prepend /compact if needed
+            needs_compact = False
+            try:
+                (
+                    modified_prompt,
+                    needs_compact,
+                ) = cli_session.prepare_auto_compact_prompt(incoming.text)
+                if needs_compact:
+                    prompt_text = modified_prompt
+                    await update_ui(
+                        self.format_status("🗜️", "Context at >75% — /compact sent"),
+                        force=True,
+                    )
+                    trace_event(
+                        stage="claude_cli",
+                        event="claude_cli.auto_compact.triggered",
+                        source=platform_nm,
+                        chat_id=chat_id,
+                        node_id=node_id,
+                        accumulated_tokens=cli_session.accumulated_tokens,
+                        context_window=cli_session.context_window,
+                    )
+            except Exception as e:
+                logger.debug("Auto-compact check failed: {}", e)
+
             async for event_data in cli_session.start_task(
-                incoming.text,
+                prompt_text,
                 session_id=parent_session_id,
                 fork_session=bool(parent_session_id),
             ):
@@ -531,6 +560,18 @@ class ClaudeMessageHandler:
                     node_id, error_msg, "Parent task failed"
                 )
         finally:
+            # Update accumulated tokens for auto-compact tracking
+            if cli_session is not None:
+                try:
+                    cli_session.update_accumulated_tokens(prompt_text)
+                except Exception as e:
+                    logger.debug(
+                        "Failed to update accumulated tokens: {}",
+                        format_exception_for_log(
+                            e, log_full_message=self._log_messaging_error_details
+                        ),
+                    )
+
             trace_event(
                 stage="routing",
                 event="turn.processor.finished",

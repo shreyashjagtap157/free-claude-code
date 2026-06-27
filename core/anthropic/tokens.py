@@ -3,12 +3,18 @@
 import json
 from functools import lru_cache
 
-import tiktoken
 from loguru import logger
 
 from .content import get_block_attr
 
-ENCODER = tiktoken.get_encoding("cl100k_base")
+
+@lru_cache(maxsize=1)
+def _get_encoding():
+    """Lazy import and cache tiktoken encoding."""
+    import tiktoken
+
+    return tiktoken.get_encoding("cl100k_base")
+
 
 _DISALLOWED_SPECIAL: tuple[str, ...] = ()
 
@@ -16,7 +22,7 @@ _DISALLOWED_SPECIAL: tuple[str, ...] = ()
 @lru_cache(maxsize=1024)
 def _count_text_tokens(text: str) -> int:
     """Cached token count (⚡ Bolt Optimization: 31-40)."""
-    return len(ENCODER.encode(text, disallowed_special=_DISALLOWED_SPECIAL))
+    return len(_get_encoding().encode(text, disallowed_special=_DISALLOWED_SPECIAL))
 
 
 def get_token_count(

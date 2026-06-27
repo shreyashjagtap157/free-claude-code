@@ -36,6 +36,17 @@ class NimSettings(BaseModel):
     chat_template: str | None = None
     request_id: str | None = None
 
+    # Timeouts for upstream NIM API (shorter than global to avoid hangs on unsupported features)
+    http_read_timeout: float = Field(
+        120.0, ge=5.0, description="Read timeout for upstream NIM API (seconds)"
+    )
+    http_write_timeout: float = Field(
+        30.0, ge=5.0, description="Write timeout for upstream NIM API (seconds)"
+    )
+    http_connect_timeout: float = Field(
+        30.0, ge=5.0, description="Connect timeout for upstream NIM API (seconds)"
+    )
+
     model_config = ConfigDict(extra="forbid")
 
     @field_validator("top_k", mode="before")

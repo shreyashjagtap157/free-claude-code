@@ -19,6 +19,7 @@ class OllamaProvider(OpenAIChatTransport):
             base_url=config.base_url or OLLAMA_DEFAULT_BASE,
             api_key=config.api_key or "ollama",
         )
+        self._model_list_client: httpx.AsyncClient | None = None
 
     def _prepare_create_body(self, body: dict[str, Any]) -> dict[str, Any]:
         """Strip fields that Ollama might reject with 400 Bad Request."""
@@ -38,10 +39,17 @@ class OllamaProvider(OpenAIChatTransport):
         return self._extract_model_ids_from_model_list_payload(resp.json())
 
     async def _send_model_list_request(self) -> httpx.Response:
-        """Query Ollama's native local model-list endpoint."""
+        """Query Ollama's native local model-list endpoint using a reusable client."""
+        if self._model_list_client is None:
+            self._model_list_client = httpx.AsyncClient(
+                timeout=10.0,
+                limits=httpx.Limits(
+                    max_connections=self._config.max_connections,
+                    max_keepalive_connections=self._config.max_keepalive_connections,
+                ),
+            )
         url = f"{self._base_url}/api/tags"
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            return await client.get(url)
+        return await self._model_list_client.get(url)
 
     def _extract_model_ids_from_model_list_payload(
         self, payload: object

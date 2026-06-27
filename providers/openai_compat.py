@@ -6,6 +6,7 @@ in separate modules; do not list them as subclasses of this class.
 
 import asyncio
 import json
+import time
 import uuid
 from abc import abstractmethod
 from collections.abc import AsyncIterator, Iterator
@@ -78,29 +79,36 @@ class OpenAIChatTransport(BaseProvider):
             rate_window=config.rate_window,
             max_concurrency=config.max_concurrency,
         )
-        http_client = None
-        if config.proxy:
-            http_client = httpx.AsyncClient(
-                proxy=config.proxy,
-                timeout=httpx.Timeout(
-                    config.http_read_timeout,
-                    connect=config.http_connect_timeout,
-                    read=config.http_read_timeout,
-                    write=config.http_write_timeout,
-                ),
-            )
-        self._client = AsyncOpenAI(
-            api_key=self._api_key,
-            base_url=self._base_url,
-            max_retries=2,
-            timeout=httpx.Timeout(
-                config.http_read_timeout,
-                connect=config.http_connect_timeout,
-                read=config.http_read_timeout,
-                write=config.http_write_timeout,
+        self._client = AsyncOpenAI(**self._build_client_kwargs())
+
+    def _build_client_kwargs(self) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            "api_key": self._api_key,
+            "base_url": self._base_url,
+            "max_retries": 2,
+            "timeout": httpx.Timeout(
+                self._config.http_read_timeout,
+                connect=self._config.http_connect_timeout,
+                read=self._config.http_read_timeout,
+                write=self._config.http_write_timeout,
             ),
-            http_client=http_client,
+        }
+        limits = httpx.Limits(
+            max_connections=self._config.max_connections,
+            max_keepalive_connections=self._config.max_keepalive_connections,
         )
+        if self._config.proxy:
+            kwargs["http_client"] = httpx.AsyncClient(
+                proxy=self._config.proxy,
+                timeout=kwargs["timeout"],
+                limits=limits,
+            )
+        else:
+            kwargs["http_client"] = httpx.AsyncClient(
+                timeout=kwargs["timeout"],
+                limits=limits,
+            )
+        return kwargs
 
     async def cleanup(self) -> None:
         """Release HTTP client resources."""
@@ -329,7 +337,10 @@ class OpenAIChatTransport(BaseProvider):
         """Stream response in Anthropic SSE format."""
         with logger.contextualize(request_id=request_id):
             async for event in self._stream_response_impl(
-                request, input_tokens, request_id, thinking_enabled=thinking_enabled
+                request,
+                input_tokens,
+                request_id,
+                thinking_enabled=thinking_enabled,
             ):
                 yield event
 
@@ -379,7 +390,13 @@ class OpenAIChatTransport(BaseProvider):
             try:
                 stream, body = await self._create_stream(body)
                 tool_argument_aliases = self._tool_argument_aliases(body)
+                _last_keepalive = time.monotonic()
                 async for chunk in stream:
+                    # Periodic keepalive pings for long-running streams
+                    _keepalive_now = time.monotonic()
+                    if _keepalive_now - _last_keepalive >= 15.0:
+                        yield ": keepalive\n\n"
+                        _last_keepalive = _keepalive_now
                     if getattr(chunk, "usage", None):
                         usage_info = chunk.usage
 

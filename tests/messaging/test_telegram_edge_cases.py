@@ -209,7 +209,9 @@ async def test_telegram_start_retries_on_network_error(monkeypatch):
 
         with (
             patch("telegram.ext.Application.builder") as mock_builder,
-            patch("messaging.limiter.MessagingRateLimiter.get_instance", AsyncMock()),
+            patch(
+                "messaging.limiter.get_messaging_rate_limiter", return_value=AsyncMock()
+            ),
         ):
             mock_app = MagicMock()
             mock_app.initialize = AsyncMock(side_effect=[NetworkError("no"), None])

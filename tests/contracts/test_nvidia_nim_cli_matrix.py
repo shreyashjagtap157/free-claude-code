@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from pydantic import SecretStr
+
 from config.settings import Settings
 from smoke.lib.claude_cli_matrix import (
     ClaudeCliRun,
@@ -27,7 +29,7 @@ def _smoke_config(tmp_path: Path) -> SmokeConfig:
         prompt="Reply with exactly: FCC_SMOKE_PONG",
         claude_bin="claude",
         worker_id="test-worker",
-        settings=Settings.model_construct(anthropic_auth_token=""),
+        settings=Settings.model_construct(anthropic_auth_token=SecretStr("")),
     )
 
 

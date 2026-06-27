@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import socket
 from collections.abc import AsyncIterator
 from urllib.parse import urljoin, urlparse
@@ -214,8 +213,8 @@ async def _run_web_fetch(url: str, egress: WebFetchEgressPolicy) -> dict[str, st
     timeout = ClientTimeout(total=_REQUEST_TIMEOUT_S)
 
     while True:
-        addr_infos = await asyncio.to_thread(
-            get_validated_stream_addrinfos_for_egress, current_url, egress
+        addr_infos = await get_validated_stream_addrinfos_for_egress(
+            current_url, egress
         )
         host = urlparse(current_url).hostname or ""
         results = getaddrinfo_rows_to_resolve_results(host, addr_infos)

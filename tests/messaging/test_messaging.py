@@ -47,11 +47,12 @@ class TestMessagingBase:
     """Test MessagingPlatform ABC."""
 
     def test_platform_is_abstract(self):
-        """Verify MessagingPlatform cannot be instantiated."""
+        """Verify MessagingPlatform is abstract."""
+        import inspect
+
         from messaging.platforms.base import MessagingPlatform
 
-        with pytest.raises(TypeError):
-            MessagingPlatform()
+        assert inspect.isabstract(MessagingPlatform)
 
 
 class TestSessionStore:

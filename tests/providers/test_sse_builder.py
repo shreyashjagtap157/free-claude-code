@@ -403,7 +403,7 @@ class TestSSEBuilderTokenEstimation:
         builder.start_text_block()
         builder.emit_text_delta("a" * 100)  # 100 chars -> ~25 tokens
 
-        with patch("core.anthropic.sse.ENCODER", None):
+        with patch("core.anthropic.sse._get_encoder", return_value=None):
             tokens = builder.estimate_output_tokens()
             assert tokens == 25  # 100 // 4
 
@@ -413,7 +413,7 @@ class TestSSEBuilderTokenEstimation:
         builder.start_tool_block(0, "t1", "Read")
         builder.emit_tool_delta(0, '{"path":"test.py"}')
 
-        with patch("core.anthropic.sse.ENCODER", None):
+        with patch("core.anthropic.sse._get_encoder", return_value=None):
             tokens = builder.estimate_output_tokens()
             # 1 tool * 50 = 50
             assert tokens == 50

@@ -143,9 +143,10 @@ def test_build_request_body_drops_reasoning_effort_none(wafer_provider):
     assert body["thinking"] == {"type": "enabled"}
 
 
-def test_build_request_body_keeps_upstream_thinking_enabled_when_client_disables_it(
+def test_build_request_body_respects_thinking_disabled_when_client_passes_false(
     wafer_provider,
 ):
+    """PRV-16: Wafer must not force thinking when the caller explicitly disables it."""
     request = MessagesRequest.model_validate(
         {
             "model": "DeepSeek-V4-Pro",
@@ -156,7 +157,7 @@ def test_build_request_body_keeps_upstream_thinking_enabled_when_client_disables
 
     body = wafer_provider._build_request_body(request, thinking_enabled=False)
 
-    assert body["thinking"] == {"type": "enabled"}
+    assert "thinking" not in body
 
 
 @pytest.mark.asyncio

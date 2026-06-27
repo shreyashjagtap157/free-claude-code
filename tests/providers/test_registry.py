@@ -8,6 +8,7 @@ from config.nim import NimSettings
 from config.provider_ids import SUPPORTED_PROVIDER_IDS
 from providers.deepseek import DeepSeekProvider
 from providers.exceptions import UnknownProviderTypeError
+from providers.google import GoogleProvider
 from providers.llamacpp import LlamaCppProvider
 from providers.lmstudio import LMStudioProvider
 from providers.nvidia_nim import NvidiaNimProvider
@@ -29,6 +30,7 @@ def _make_settings(**overrides):
     mock.open_router_api_key = "test_openrouter_key"
     mock.deepseek_api_key = "test_deepseek_key"
     mock.wafer_api_key = "test_wafer_key"
+    mock.google_api_key = "test_google_key"
     mock.lm_studio_base_url = "http://localhost:1234/v1"
     mock.llamacpp_base_url = "http://localhost:8080/v1"
     mock.ollama_base_url = "http://localhost:11434"
@@ -38,6 +40,8 @@ def _make_settings(**overrides):
     mock.llamacpp_proxy = ""
     mock.kimi_proxy = ""
     mock.wafer_proxy = ""
+    mock.google_proxy = ""
+    mock.google_base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
     mock.provider_rate_limit = 40
     mock.provider_rate_window = 60
     mock.provider_max_concurrency = 5
@@ -45,7 +49,7 @@ def _make_settings(**overrides):
     mock.http_write_timeout = 10.0
     mock.http_connect_timeout = 10.0
     mock.enable_model_thinking = True
-    mock.nim = NimSettings()
+    mock.nim = NimSettings.model_construct()
     for key, value in overrides.items():
         setattr(mock, key, value)
     return mock
@@ -99,6 +103,7 @@ def test_create_provider_instantiates_each_builtin():
         "llamacpp": LlamaCppProvider,
         "ollama": OllamaProvider,
         "wafer": WaferProvider,
+        "google": GoogleProvider,
     }
 
     with (

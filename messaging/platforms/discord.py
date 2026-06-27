@@ -50,10 +50,12 @@ def _parse_allowed_channels(raw: str | None) -> set[str]:
     return {s.strip() for s in raw.split(",") if s.strip()}
 
 
+_DiscordClient: type[Any] | None = None
+
 if DISCORD_AVAILABLE and _discord_module is not None:
     _discord = _discord_module
 
-    class _DiscordClient(_discord.Client):
+    class _DiscordClientImpl(_discord.Client):
         """Internal Discord client that forwards events to DiscordPlatform."""
 
         def __init__(
@@ -72,8 +74,8 @@ if DISCORD_AVAILABLE and _discord_module is not None:
         async def on_message(self, message: Any) -> None:
             """Handle incoming Discord messages."""
             await self._platform._handle_client_message(message)
-else:
-    _DiscordClient = None
+
+    _DiscordClient = _DiscordClientImpl
 
 
 class DiscordPlatform(MessagingPlatform):
@@ -368,9 +370,9 @@ class DiscordPlatform(MessagingPlatform):
         if not self.bot_token:
             raise ValueError("DISCORD_BOT_TOKEN is required")
 
-        from ..limiter import MessagingRateLimiter
+        from ..limiter import get_messaging_rate_limiter
 
-        self._limiter = await MessagingRateLimiter.get_instance(
+        self._limiter = get_messaging_rate_limiter(
             rate_limit=self._messaging_rate_limit,
             rate_window=self._messaging_rate_window,
         )
@@ -553,6 +555,7 @@ class DiscordPlatform(MessagingPlatform):
         self,
         chat_id: str,
         message_ids: list[str],
+        *,
         fire_and_forget: bool = True,
     ) -> None:
         """Enqueue a bulk delete."""

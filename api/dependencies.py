@@ -17,10 +17,9 @@ from providers.exceptions import (
 )
 from providers.registry import PROVIDER_DESCRIPTORS, ProviderRegistry
 
-# Process-level cache: only for :func:`get_provider_for_type` / :func:`get_provider`
-# when there is no ``Request``/``app`` (unit tests, scripts). HTTP handlers must pass
-# ``app`` to :func:`resolve_provider` so the app-scoped registry is used.
-_providers: dict[str, BaseProvider] = {}
+# Module-level registry for non-HTTP callers (scripts, unit tests).
+# HTTP handlers use the app-scoped registry from ``app.state.provider_registry``.
+_fallback_registry: ProviderRegistry | None = None
 
 
 def get_settings() -> Settings:
@@ -52,7 +51,10 @@ def resolve_provider(
                 "or assign app.state.provider_registry for test apps."
             )
         return _resolve_with_registry(reg, provider_type, settings)
-    return _resolve_with_registry(ProviderRegistry(_providers), provider_type, settings)
+    global _fallback_registry
+    if _fallback_registry is None:
+        _fallback_registry = ProviderRegistry()
+    return _resolve_with_registry(_fallback_registry, provider_type, settings)
 
 
 def _resolve_with_registry(
@@ -96,7 +98,7 @@ def require_api_key(
     Checks `x-api-key` header or `Authorization: Bearer ...` against
     `Settings.anthropic_auth_token`. If `ANTHROPIC_AUTH_TOKEN` is empty, this is a no-op.
     """
-    anthropic_auth_token = settings.anthropic_auth_token
+    anthropic_auth_token = settings.anthropic_auth_token.get_secret_value()
     if not anthropic_auth_token:
         # No API key configured -> allow
         return
@@ -138,7 +140,8 @@ def get_provider() -> BaseProvider:
 
 async def cleanup_provider():
     """Cleanup all provider resources."""
-    global _providers
-    await ProviderRegistry(_providers).cleanup()
-    _providers = {}
+    global _fallback_registry
+    if _fallback_registry is not None:
+        await _fallback_registry.cleanup()
+        _fallback_registry = None
     logger.debug("Provider cleanup completed")

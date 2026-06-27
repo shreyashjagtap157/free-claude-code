@@ -132,17 +132,20 @@ def test_service_rejects_forced_server_tool_on_openai_when_disabled():
         "http://169.254.169.254/latest/meta-data/",
     ],
 )
-def test_enforce_web_fetch_egress_blocks_internal_or_disallowed(url: str):
+@pytest.mark.asyncio
+async def test_enforce_web_fetch_egress_blocks_internal_or_disallowed(url: str):
     with pytest.raises(WebFetchEgressViolation):
-        enforce_web_fetch_egress(url, _STRICT_EGRESS)
+        await enforce_web_fetch_egress(url, _STRICT_EGRESS)
 
 
-def test_enforce_web_fetch_egress_allows_global_literal_ip():
-    enforce_web_fetch_egress("http://8.8.8.8/", _STRICT_EGRESS)
+@pytest.mark.asyncio
+async def test_enforce_web_fetch_egress_allows_global_literal_ip():
+    await enforce_web_fetch_egress("http://8.8.8.8/", _STRICT_EGRESS)
 
 
-def test_enforce_web_fetch_egress_skips_private_checks_when_opted_in():
-    enforce_web_fetch_egress(
+@pytest.mark.asyncio
+async def test_enforce_web_fetch_egress_skips_private_checks_when_opted_in():
+    await enforce_web_fetch_egress(
         "http://127.0.0.1/",
         WebFetchEgressPolicy(
             allow_private_network_targets=True,

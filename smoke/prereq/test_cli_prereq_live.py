@@ -61,8 +61,10 @@ def test_claude_cli_prompt_when_available(
     ) as server:
         env = os.environ.copy()
         env["ANTHROPIC_BASE_URL"] = server.base_url
-        if smoke_config.settings.anthropic_auth_token:
-            env["ANTHROPIC_AUTH_TOKEN"] = smoke_config.settings.anthropic_auth_token
+        if smoke_config.settings.anthropic_auth_token.get_secret_value():
+            env["ANTHROPIC_AUTH_TOKEN"] = (
+                smoke_config.settings.anthropic_auth_token.get_secret_value()
+            )
         result = subprocess.run(
             [claude_bin, "-p", "Reply with exactly FCC_SMOKE_PONG"],
             cwd=tmp_path,

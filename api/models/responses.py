@@ -21,6 +21,10 @@ class ModelResponse(BaseModel):
     display_name: str
     id: str
     type: Literal["model"] = "model"
+    context_window: int | None = None
+    max_output_tokens: int | None = None
+    supports_vision: bool | None = None
+    supports_tools: bool | None = None
 
 
 class ModelsListResponse(BaseModel):

@@ -29,7 +29,9 @@ async def test_telegram_platform_start_success(telegram_platform):
         mock_builder.return_value.token.return_value.request.return_value.build.return_value = mock_app
 
         # Mock MessagingRateLimiter
-        with patch("messaging.limiter.MessagingRateLimiter.get_instance", AsyncMock()):
+        with patch(
+            "messaging.limiter.get_messaging_rate_limiter", return_value=AsyncMock()
+        ):
             await telegram_platform.start()
 
             assert telegram_platform._connected is True

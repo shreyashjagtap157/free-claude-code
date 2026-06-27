@@ -8,6 +8,7 @@ using a strict sliding window algorithm and a task queue.
 import asyncio
 from collections import deque
 from collections.abc import Awaitable, Callable
+from functools import cache
 from typing import Any
 
 from loguru import logger
@@ -20,45 +21,16 @@ from .safe_diagnostics import format_exception_for_log
 
 class MessagingRateLimiter:
     """
-    A thread-safe global rate limiter for messaging.
+    A rate limiter for messaging with a task compaction queue.
 
-    Uses a custom queue with task compaction (deduplication) to ensure
-    only the latest version of a message update is processed.
+    Not a singleton --- use :func:`get_messaging_rate_limiter` for the standard
+    production instance. Tests may construct instances directly or patch the
+    factory function.
     """
 
-    _instance: MessagingRateLimiter | None = None
-    _lock = asyncio.Lock()
-
-    def __new__(cls, *args, **kwargs):
-        return super().__new__(cls)
-
-    @classmethod
-    async def get_instance(
-        cls,
-        *,
-        rate_limit: int = 1,
-        rate_window: float = 1.0,
-    ) -> MessagingRateLimiter:
-        """Get the singleton instance of the limiter.
-
-        ``rate_limit`` and ``rate_window`` apply only when the singleton is first
-        created. Call :meth:`shutdown_instance` before changing parameters.
-        """
-        async with cls._lock:
-            if cls._instance is None:
-                cls._instance = cls(rate_limit=rate_limit, rate_window=rate_window)
-                # Start the background worker (tracked for graceful shutdown).
-                cls._instance._start_worker()
-        return cls._instance
-
     def __init__(self, *, rate_limit: int, rate_window: float) -> None:
-        # Prevent double initialization in singleton
-        if hasattr(self, "_initialized"):
-            return
-
         self.limiter = SlidingWindowLimiter(rate_limit, rate_window)
-        # Custom queue state - using deque for O(1) popleft
-        self._queue_list: deque[str] = deque()  # Deque of dedup_keys in order
+        self._queue_list: deque[str] = deque()
         self._queue_map: dict[
             str, tuple[Callable[[], Awaitable[Any]], list[asyncio.Future]]
         ] = {}
@@ -66,12 +38,12 @@ class MessagingRateLimiter:
         self._shutdown = asyncio.Event()
         self._worker_task: asyncio.Task | None = None
 
-        self._initialized = True
         self._paused_until = 0
 
         logger.info(
             f"MessagingRateLimiter initialized ({rate_limit} req / {rate_window}s with Task Compaction)"
         )
+        self._start_worker()
 
     def _start_worker(self) -> None:
         """Ensure the worker task exists."""
@@ -114,18 +86,18 @@ class MessagingRateLimiter:
                         for f in futures:
                             if not f.done():
                                 f.set_result(result)
-                    except Exception as e:
+                    except Exception as exc:
                         # Report error to all futures and log it
                         for f in futures:
                             if not f.done():
-                                f.set_exception(e)
+                                f.set_exception(exc)
 
-                        error_msg = str(e).lower()
+                        error_msg = str(exc).lower()
                         if "flood" in error_msg or "wait" in error_msg:
                             seconds = 30
                             try:
-                                if hasattr(e, "seconds"):
-                                    seconds = e.seconds
+                                if hasattr(exc, "seconds"):
+                                    seconds = exc.seconds  # type: ignore[attr-defined]
                                 elif "after " in error_msg:
                                     # Try to parse "retry after X"
                                     parts = error_msg.split("after ")
@@ -150,22 +122,22 @@ class MessagingRateLimiter:
                             logger.error(
                                 "Error in limiter worker for key {}: {}",
                                 dedup_key,
-                                format_exception_for_log(e, log_full_message=d),
+                                format_exception_for_log(exc, log_full_message=d),
                             )
             except asyncio.CancelledError:
                 break
-            except Exception as e:
+            except Exception as exc:
                 d = get_settings().log_messaging_error_details
                 if d:
                     logger.error(
                         "MessagingRateLimiter worker critical error: {}",
-                        e,
+                        exc,
                         exc_info=True,
                     )
                 else:
                     logger.error(
                         "MessagingRateLimiter worker critical error: exc_type={}",
-                        type(e).__name__,
+                        type(exc).__name__,
                     )
                 await asyncio.sleep(1)
 
@@ -191,25 +163,14 @@ class MessagingRateLimiter:
             logger.warning("MessagingRateLimiter worker did not stop before timeout")
         except asyncio.CancelledError:
             pass
-        except Exception as e:
+        except Exception as exc:
             d = get_settings().log_messaging_error_details
             logger.debug(
                 "MessagingRateLimiter worker shutdown error: {}",
-                format_exception_for_log(e, log_full_message=d),
+                format_exception_for_log(exc, log_full_message=d),
             )
         finally:
             self._worker_task = None
-
-    @classmethod
-    async def shutdown_instance(cls, timeout: float = 2.0) -> None:
-        """Shutdown and clear the singleton instance (safe to call multiple times)."""
-        inst = cls._instance
-        if not inst:
-            return
-        try:
-            await inst.shutdown(timeout=timeout)
-        finally:
-            cls._instance = None
 
     async def _enqueue_internal(self, func, future, dedup_key, front=False):
         await self._enqueue_internal_multi(func, [future], dedup_key, front)
@@ -261,8 +222,8 @@ class MessagingRateLimiter:
             for attempt in range(max_retries + 1):
                 try:
                     return await self.enqueue(func, dedup_key)
-                except Exception as e:
-                    error_msg = str(e).lower()
+                except Exception as exc:
+                    error_msg = str(exc).lower()
                     # Only retry transient connectivity issues that might have slipped through
                     # or occurred between platform checks.
                     if attempt < max_retries and any(
@@ -274,14 +235,14 @@ class MessagingRateLimiter:
                             logger.warning(
                                 "Limiter fire_and_forget transient error (attempt {}): {}. Retrying in {}s...",
                                 attempt + 1,
-                                e,
+                                exc,
                                 wait,
                             )
                         else:
                             logger.warning(
                                 "Limiter fire_and_forget transient error (attempt {}): exc_type={}. Retrying in {}s...",
                                 attempt + 1,
-                                type(e).__name__,
+                                type(exc).__name__,
                                 wait,
                             )
                         await asyncio.sleep(wait)
@@ -291,10 +252,24 @@ class MessagingRateLimiter:
                     logger.error(
                         "Final error in fire_and_forget for key {}: {}",
                         dedup_key,
-                        format_exception_for_log(e, log_full_message=d),
+                        format_exception_for_log(exc, log_full_message=d),
                     )
                     if not future.done():
-                        future.set_exception(e)
+                        future.set_exception(exc)
                     break
 
         _ = asyncio.create_task(_wrapped())
+
+
+@cache
+def get_messaging_rate_limiter(
+    rate_limit: int = 1,
+    rate_window: float = 1.0,
+) -> MessagingRateLimiter:
+    """Return the canonical production rate-limiter instance (cached by arguments).
+
+    Patching this function (e.g. with ``unittest.mock.patch``) lets tests
+    supply an isolated :class:`MessagingRateLimiter` without affecting other
+    tests.
+    """
+    return MessagingRateLimiter(rate_limit=rate_limit, rate_window=rate_window)

@@ -124,6 +124,11 @@ class TelegramPlatform(MessagingPlatform):
 
     async def start(self) -> None:
         """Initialize and connect to Telegram."""
+        if not TELEGRAM_AVAILABLE:
+            raise ImportError(
+                "Telegram support requires python-telegram-bot. "
+                "Install with: pip install python-telegram-bot"
+            )
         if not self.bot_token:
             raise ValueError("TELEGRAM_BOT_TOKEN is required")
 
@@ -178,9 +183,9 @@ class TelegramPlatform(MessagingPlatform):
                     raise
 
         # Initialize rate limiter
-        from ..limiter import MessagingRateLimiter
+        from ..limiter import get_messaging_rate_limiter
 
-        self._limiter = await MessagingRateLimiter.get_instance(
+        self._limiter = get_messaging_rate_limiter(
             rate_limit=self._messaging_rate_limit,
             rate_window=self._messaging_rate_window,
         )
@@ -222,6 +227,11 @@ class TelegramPlatform(MessagingPlatform):
         self, func: Callable[..., Awaitable[Any]], *args, **kwargs
     ) -> Any:
         """Helper to execute a function with exponential backoff on network errors."""
+        if not TELEGRAM_AVAILABLE:
+            raise ImportError(
+                "Telegram support requires python-telegram-bot. "
+                "Install with: pip install python-telegram-bot"
+            )
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -445,6 +455,7 @@ class TelegramPlatform(MessagingPlatform):
         self,
         chat_id: str,
         message_ids: list[str],
+        *,
         fire_and_forget: bool = True,
     ) -> None:
         """Enqueue a bulk delete (if supported) or a sequence of deletes."""

@@ -1,7 +1,9 @@
 """FastAPI application factory and configuration."""
 
+import asyncio
 import time
 import traceback
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
@@ -78,7 +80,13 @@ class GracefulLifespanApp:
             if message["type"] == "lifespan.shutdown":
                 if startup_complete:
                     try:
-                        await runtime.shutdown()
+                        await asyncio.wait_for(runtime.shutdown(), timeout=10.0)
+                    except TimeoutError:
+                        logger.error("Shutdown timed out after 10s")
+                        await send(
+                            {"type": "lifespan.shutdown.failed", "message": "timeout"}
+                        )
+                        return
                     except Exception as exc:
                         logger.error("Shutdown failed: exc_type={}", type(exc).__name__)
                         await send({"type": "lifespan.shutdown.failed", "message": ""})
@@ -97,6 +105,13 @@ def create_app(*, lifespan_enabled: bool = True) -> FastAPI:
     app_kwargs: dict[str, Any] = {
         "title": "Claude Code Proxy",
         "version": "2.0.0",
+        "openapi_tags": [
+            {"name": "messages", "description": "Message creation and token counting"},
+            {"name": "models", "description": "Model listing and discovery"},
+            {"name": "admin", "description": "Local admin UI and configuration"},
+            {"name": "health", "description": "Health check endpoints"},
+            {"name": "system", "description": "System management (stop, status)"},
+        ],
     }
     if lifespan_enabled:
         app_kwargs["lifespan"] = lifespan
@@ -115,7 +130,7 @@ def create_app(*, lifespan_enabled: bool = True) -> FastAPI:
         "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
         "Cross-Origin-Opener-Policy": "same-origin",
         "Cross-Origin-Resource-Policy": "same-origin",
-        "Cross-Origin-Embedder-Policy": "require-corp",
+        "Cross-Origin-Embedder-Policy": "credentialless",
         "Permissions-Policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
         "Content-Security-Policy": (
             "default-src 'self'; "
@@ -187,19 +202,19 @@ def create_app(*, lifespan_enabled: bool = True) -> FastAPI:
 
             # 2. Security Headers
             response.headers.update(SECURITY_HEADERS)
-            
+
             # 3. Log request duration and metrics
             duration = time.perf_counter() - start_time
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            
+
             if isinstance(runtime, AppRuntime):
                 runtime.active_request_end()
-            
+
             client_host = request.client.host if request.client else "unknown"
             logger.info(
-                f"[{timestamp}] {client_host} - \"{request.method} {request.url.path}\" {response.status_code} (took {duration:.3f}s)"
+                f'[{timestamp}] {client_host} - "{request.method} {request.url.path}" {response.status_code} (took {duration:.3f}s)'
             )
-            
+
             return response
 
     # Register routes
@@ -262,14 +277,16 @@ def create_app(*, lifespan_enabled: bool = True) -> FastAPI:
 
     @app.exception_handler(Exception)
     async def general_error_handler(request: Request, exc: Exception):
-        """Handle general errors and return Anthropic format."""
+        """Handle general errors and return Anthropic format with correlation ID."""
+        request_id = f"req_{uuid.uuid4().hex[:12]}"
         settings = get_settings()
         if settings.log_api_error_tracebacks:
-            logger.error("General Error: {}", exc)
+            logger.error("General Error [{}]: {}", request_id, exc)
             logger.error(traceback.format_exc())
         else:
             logger.error(
-                "General Error: path={} method={} exc_type={}",
+                "General Error [{}]: path={} method={} exc_type={}",
+                request_id,
                 request.url.path,
                 request.method,
                 type(exc).__name__,
@@ -283,6 +300,7 @@ def create_app(*, lifespan_enabled: bool = True) -> FastAPI:
                     "message": "An unexpected error occurred.",
                 },
             },
+            headers={"X-Request-ID": request_id},
         )
 
     return app

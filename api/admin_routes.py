@@ -111,13 +111,13 @@ def _asset_response(filename: str) -> FileResponse:
     return FileResponse(_ASSET_CACHE[filename])
 
 
-@router.get("/admin", include_in_schema=False)
+@router.get("/admin", include_in_schema=False, tags=["admin"])
 async def admin_page(request: Request):
     require_loopback_admin(request)
     return _asset_response("index.html")
 
 
-@router.get("/admin/assets/{filename}", include_in_schema=False)
+@router.get("/admin/assets/{filename}", include_in_schema=False, tags=["admin"])
 async def admin_asset(filename: str, request: Request):
     require_loopback_admin(request)
     if filename not in {"admin.css", "admin.js"}:
@@ -125,19 +125,19 @@ async def admin_asset(filename: str, request: Request):
     return _asset_response(filename)
 
 
-@router.get("/admin/api/config")
+@router.get("/admin/api/config", tags=["admin"])
 async def get_admin_config(request: Request):
     require_loopback_admin(request)
     return load_config_response()
 
 
-@router.post("/admin/api/config/validate")
+@router.post("/admin/api/config/validate", tags=["admin"])
 async def validate_admin_config(payload: AdminConfigPayload, request: Request):
     require_loopback_admin(request)
     return validate_updates(_filtered_values(payload.values))
 
 
-@router.post("/admin/api/config/apply")
+@router.post("/admin/api/config/apply", tags=["admin"])
 async def apply_admin_config(
     payload: AdminConfigPayload,
     request: Request,
@@ -165,7 +165,7 @@ async def apply_admin_config(
     return result
 
 
-@router.get("/admin/api/status")
+@router.get("/admin/api/status", tags=["admin"])
 async def admin_status(request: Request):
     require_loopback_admin(request)
     settings = get_cached_settings()
@@ -177,12 +177,13 @@ async def admin_status(request: Request):
             provider_id: sorted(model_ids)
             for provider_id, model_ids in registry.cached_model_ids().items()
         }
-    
+
     stats = {}
     from .runtime import AppRuntime
+
     if isinstance(runtime, AppRuntime):
         stats = runtime.get_stats()
-        
+
     return {
         "status": "running",
         "host": settings.host,
@@ -196,7 +197,7 @@ async def admin_status(request: Request):
     }
 
 
-@router.get("/admin/api/providers/local-status")
+@router.get("/admin/api/providers/local-status", tags=["admin"])
 async def local_provider_status(request: Request):
     require_loopback_admin(request)
     config = load_config_response()
@@ -208,7 +209,7 @@ async def local_provider_status(request: Request):
     return {"providers": checks}
 
 
-@router.post("/admin/api/providers/{provider_id}/test")
+@router.post("/admin/api/providers/{provider_id}/test", tags=["admin"])
 async def test_provider(provider_id: str, request: Request):
     require_loopback_admin(request)
     settings = get_cached_settings()
@@ -233,7 +234,7 @@ async def test_provider(provider_id: str, request: Request):
     }
 
 
-@router.post("/admin/api/models/refresh")
+@router.post("/admin/api/models/refresh", tags=["admin"])
 async def refresh_models(request: Request):
     require_loopback_admin(request)
     settings = get_cached_settings()

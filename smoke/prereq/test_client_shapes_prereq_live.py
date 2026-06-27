@@ -33,7 +33,7 @@ def test_vscode_and_jetbrains_shaped_requests(
     assert vscode.json()["content"][0]["text"] == "Quota check passed."
 
     jetbrains_headers = auth_headers()
-    token = smoke_config.settings.anthropic_auth_token
+    token = smoke_config.settings.anthropic_auth_token.get_secret_value()
     if token:
         jetbrains_headers.pop("x-api-key", None)
         jetbrains_headers["authorization"] = f"Bearer {token}"

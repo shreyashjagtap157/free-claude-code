@@ -1,20 +1,183 @@
-"""Global rate limiter for API requests."""
+"""Global rate limiter with circuit breaker for API requests."""
 
 import asyncio
+import enum
 import random
 import time
 from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Any, ClassVar, TypeVar
 
 import httpx
 import openai
+import tenacity
 from loguru import logger
 
-from core.rate_limit import StrictSlidingWindowLimiter
+from core.rate_limit import TokenBucketRateLimiter
 from core.trace import trace_event
 
 T = TypeVar("T")
+
+
+# =============================================================================
+# Circuit Breaker — fail-fast when upstream is degraded
+# =============================================================================
+
+
+class CircuitState(enum.Enum):
+    CLOSED = "closed"  # Normal operation, requests flow through
+    OPEN = "open"  # Degraded — requests fail-fast, no upstream call
+    HALF_OPEN = "half_open"  # Recovery probe — limited requests allowed
+
+
+class CircuitBreaker:
+    """Per-provider circuit breaker for fail-fast upstream degradation.
+
+    Tracks consecutive failures. When the threshold is exceeded, the
+    circuit opens and new requests fail immediately without calling
+    the upstream. After a recovery timeout, the circuit transitions to
+    half-open, allowing a limited number of probe requests. If probes
+    succeed, the circuit resets to closed; a single failure re-opens it.
+
+    Thread-safe for the asyncio event loop (all access from one thread).
+    """
+
+    def __init__(
+        self,
+        scope: str,
+        *,
+        failure_threshold: int = 5,
+        recovery_timeout: float = 30.0,
+        half_open_max_requests: int = 3,
+    ):
+        self._scope = scope
+        self._failure_threshold = failure_threshold
+        self._recovery_timeout = recovery_timeout
+        self._half_open_max_requests = half_open_max_requests
+        self._state: CircuitState = CircuitState.CLOSED
+        self._consecutive_failures: int = 0
+        self._opened_at: float = 0.0  # monotonic time when circuit opened
+        self._half_open_requests: int = 0
+        self._half_open_successes: int = 0
+
+    @property
+    def state(self) -> CircuitState:
+        """Return the current effective state.
+
+        Transitions from OPEN to HALF_OPEN automatically when the recovery
+        timeout has elapsed.
+        """
+        if self._state == CircuitState.OPEN and self._is_recovery_due():
+            self._transition_to(CircuitState.HALF_OPEN)
+        return self._state
+
+    @property
+    def consecutive_failures(self) -> int:
+        return self._consecutive_failures
+
+    @property
+    def scope(self) -> str:
+        return self._scope
+
+    @property
+    def recovery_timeout(self) -> float:
+        return self._recovery_timeout
+
+    def _is_recovery_due(self) -> bool:
+        return (time.monotonic() - self._opened_at) >= self._recovery_timeout
+
+    def _transition_to(self, new_state: CircuitState) -> None:
+        old_state = self._state
+        self._state = new_state
+        logger.warning(
+            "CircuitBreaker[{}] state transition: {} -> {}",
+            self._scope,
+            old_state.value,
+            new_state.value,
+        )
+        trace_event(
+            stage="provider",
+            event="provider.circuit_breaker.transition",
+            source="provider",
+            provider=self._scope,
+            old_state=old_state.value,
+            new_state=new_state.value,
+            consecutive_failures=self._consecutive_failures,
+        )
+        if new_state == CircuitState.OPEN:
+            self._opened_at = time.monotonic()
+        elif new_state == CircuitState.CLOSED:
+            self._consecutive_failures = 0
+            self._half_open_requests = 0
+            self._half_open_successes = 0
+        elif new_state == CircuitState.HALF_OPEN:
+            self._half_open_requests = 0
+            self._half_open_successes = 0
+
+    def _is_half_open_exhausted(self) -> bool:
+        """Return True when the half-open probe limit has been reached."""
+        return self._half_open_requests >= self._half_open_max_requests
+
+    def may_proceed(self) -> bool:
+        """Check whether the caller may attempt an upstream request.
+
+        Returns ``False`` when the circuit is open (fail-fast). In
+        half-open state, returns ``True`` for probe requests up to
+        ``half_open_max_requests``, then ``False``.
+        """
+        effective_state = self.state  # triggers OPEN -> HALF_OPEN transition
+        if effective_state == CircuitState.CLOSED:
+            return True
+        if effective_state == CircuitState.OPEN:
+            return False
+        # Half-open: allow up to half_open_max_requests probe requests.
+        if self._is_half_open_exhausted():
+            return False
+        self._half_open_requests += 1
+        return True
+
+    def on_success(self) -> None:
+        """Report a successful upstream call.
+
+        In CLOSED state: resets consecutive failure counter. In HALF_OPEN
+        state: increments success counter. When enough consecutive probes
+        succeed, transitions back to CLOSED.
+        """
+        if self._state == CircuitState.CLOSED:
+            self._consecutive_failures = 0
+        elif self._state == CircuitState.HALF_OPEN:
+            self._half_open_successes += 1
+            # Require all probe requests to succeed before closing.
+            if self._half_open_successes >= self._half_open_max_requests:
+                self._transition_to(CircuitState.CLOSED)
+        # OPEN state does not call on_success (requests are blocked upstream).
+
+    def on_failure(self) -> None:
+        """Report an upstream failure.
+
+        Increments consecutive failure counter. When threshold is
+        exceeded, transitions to OPEN (or re-opens if already HALF_OPEN).
+        """
+        self._consecutive_failures += 1
+        if self._consecutive_failures >= self._failure_threshold:
+            self._transition_to(CircuitState.OPEN)
+
+
+class CircuitBreakerOpenError(Exception):
+    """Raised when a request is rejected by an open circuit breaker.
+
+    The upstream provider is degraded and the circuit is open; callers
+    should fail fast rather than retrying. The circuit will automatically
+    transition to half-open after the recovery timeout.
+    """
+
+    def __init__(self, scope: str, retry_after: float) -> None:
+        self.scope = scope
+        self.retry_after = retry_after
+        super().__init__(
+            f"Provider '{scope}' circuit breaker is open; "
+            f"retry after {retry_after:.0f}s"
+        )
 
 
 def _upstream_http_retryable(code: int) -> bool:
@@ -65,7 +228,9 @@ class GlobalRateLimiter:
         self,
         rate_limit: int = 40,
         rate_window: float = 60.0,
-        max_concurrency: int = 5,
+        max_concurrency: int = 3,
+        *,
+        scope: str = "default",
     ):
         # Prevent re-initialization on singleton reuse
         if hasattr(self, "_initialized"):
@@ -81,11 +246,12 @@ class GlobalRateLimiter:
         self._rate_limit = rate_limit
         self._rate_window = float(rate_window)
         self._max_concurrency = max_concurrency
-        self._proactive_limiter = StrictSlidingWindowLimiter(
+        self._proactive_limiter = TokenBucketRateLimiter(
             self._rate_limit, self._rate_window
         )
         self._blocked_until: float = 0
         self._concurrency_sem = asyncio.Semaphore(max_concurrency)
+        self._circuit_breaker = CircuitBreaker(scope)
         self._initialized = True
 
         logger.info(
@@ -97,7 +263,7 @@ class GlobalRateLimiter:
         cls,
         rate_limit: int | None = None,
         rate_window: float | None = None,
-        max_concurrency: int = 5,
+        max_concurrency: int = 3,
     ) -> GlobalRateLimiter:
         """Get or create the singleton instance.
 
@@ -121,7 +287,7 @@ class GlobalRateLimiter:
         *,
         rate_limit: int | None = None,
         rate_window: float | None = None,
-        max_concurrency: int = 5,
+        max_concurrency: int = 3,
     ) -> GlobalRateLimiter:
         """Get or create a provider-scoped limiter instance."""
         if not scope:
@@ -141,6 +307,7 @@ class GlobalRateLimiter:
             rate_limit=desired_rate_limit,
             rate_window=desired_rate_window,
             max_concurrency=max_concurrency,
+            scope=scope,
         )
         return cls._scoped_instances[scope]
 
@@ -191,6 +358,24 @@ class GlobalRateLimiter:
         self._blocked_until = time.monotonic() + seconds
         logger.warning(f"Global provider rate limit set for {seconds:.1f}s (reactive)")
 
+    def set_blocked_from_response(
+        self, seconds: int = 60, *, response: httpx.Response | None = None
+    ) -> None:
+        """
+        Set global block, preferring ``Retry-After`` header from *response*.
+
+        Args:
+            seconds: Default block duration if no header or header unparseable.
+            response: Optional HTTP response whose ``Retry-After`` header is used
+                      instead of *seconds* when present and parseable.
+        """
+        if response is not None:
+            retry_after = response.headers.get("Retry-After")
+            if retry_after is not None:
+                with suppress(ValueError, TypeError):
+                    seconds = int(retry_after)
+        self.set_blocked(seconds)
+
     def is_blocked(self) -> bool:
         """Check if currently reactively blocked."""
         return time.monotonic() < self._blocked_until
@@ -231,11 +416,18 @@ class GlobalRateLimiter:
         jitter: float = 1.0,
         **kwargs: Any,
     ) -> Any:
-        """Execute an async callable with rate limiting and retry on transient limits.
+        """Execute an async callable with rate limiting, circuit breaker, and tenacity retry.
 
-        Waits for the proactive limiter before each attempt. On ``429`` (rate limit)
-        or upstream ``5xx`` server errors, applies exponential backoff with jitter
-        and sets the reactive block before retrying.
+        Before the first attempt, checks the circuit breaker. If the circuit is open,
+        raises :exc:`CircuitBreakerOpenError` immediately (fail-fast). Otherwise,
+        waits for the proactive limiter and executes the callable.
+
+        On ``429`` (rate limit) or upstream ``5xx`` server errors, uses tenacity's
+        declarative retry with exponential backoff and jitter, sets the reactive
+        block, and retries.
+
+        On success, reports success to the circuit breaker (may reset the failure
+        counter and transition back to CLOSED from HALF_OPEN).
 
         Args:
             fn: Async callable to execute.
@@ -248,57 +440,95 @@ class GlobalRateLimiter:
             The result of the callable.
 
         Raises:
-            The last exception if all retries are exhausted.
+            CircuitBreakerOpenError: When the circuit is open (fail-fast).
+            The last exception from the callable if all retries are exhausted.
         """
-        last_exc: Exception | None = None
-        total_attempts = 1 + max_retries
+        # Circuit breaker: fail-fast when the upstream is degraded.
+        if not self._circuit_breaker.may_proceed():
+            raise CircuitBreakerOpenError(
+                scope=self._circuit_breaker.scope,
+                retry_after=self._circuit_breaker.recovery_timeout,
+            )
 
-        for attempt in range(total_attempts):
-            await self.wait_if_blocked()
+        max_attempts = 1 + max_retries
+        retrier = tenacity.AsyncRetrying(
+            stop=tenacity.stop_after_attempt(max_attempts),
+            wait=tenacity.wait_exponential(
+                multiplier=base_delay, min=base_delay, max=max_delay
+            )
+            + tenacity.wait_random(0, jitter),
+            retry=tenacity.retry_if_exception(
+                lambda e: retryable_upstream_status(e) is not None
+            ),
+            reraise=True,
+            before_sleep=self._make_before_retry_callback(
+                base_delay, max_delay, jitter, max_attempts
+            ),
+        )
 
-            try:
-                return await fn(*args, **kwargs)
-            except Exception as e:
-                status = retryable_upstream_status(e)
-                if status is None:
-                    raise
+        try:
+            async for attempt in retrier:
+                with attempt:
+                    await self.wait_if_blocked()
+                    result = await fn(*args, **kwargs)
+                    self._circuit_breaker.on_success()
+                    return result
+        except Exception:
+            self._circuit_breaker.on_failure()
+            raise
 
-                label = (
-                    "Rate limited (429)"
-                    if status == 429
-                    else f"Upstream server error ({status})"
-                )
-                last_exc = e
-                if attempt >= max_retries:
-                    logger.warning(
-                        "{} retry exhausted after {} retries (attempts={})",
-                        label,
-                        max_retries,
-                        total_attempts,
-                    )
-                    break
+    def _make_before_retry_callback(
+        self,
+        base_delay: float,
+        max_delay: float,
+        jitter: float,
+        max_attempts: int,
+    ) -> Callable:
+        """Build the ``before_sleep`` callback for tenacity retry logging.
 
-                delay = min(base_delay * (2**attempt), max_delay)
-                delay += random.uniform(0, jitter)
-                attempt_no = attempt + 1
-                logger.warning(
-                    "{}, attempt {}/{}. Retrying in {:.1f}s...",
-                    label,
-                    attempt_no,
-                    total_attempts,
-                    delay,
-                )
-                trace_event(
-                    stage="provider",
-                    event="provider.retry.scheduled",
-                    source="provider",
-                    status_code=status,
-                    attempt=attempt_no,
-                    max_attempts=total_attempts,
-                    delay_s=round(delay, 3),
-                )
-                self.set_blocked(delay)
-                await asyncio.sleep(delay)
+        Called by tenacity before each retry sleep to log the attempt and
+        set the reactive block from the upstream response (``Retry-After``).
+        """
 
-        assert last_exc is not None
-        raise last_exc
+        def _before_sleep(retry_state: tenacity.RetryCallState) -> None:
+            attempt = retry_state.attempt_number
+            outcome = retry_state.outcome
+            if outcome is None:
+                return
+            exc = outcome.exception()
+            if exc is None:
+                return
+            status = retryable_upstream_status(exc)
+            if status is None:
+                return
+
+            label = (
+                "Rate limited (429)"
+                if status == 429
+                else f"Upstream server error ({status})"
+            )
+            response = getattr(exc, "response", None)
+            # Replicate the same exponential backoff formula for logging clarity.
+            delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
+            delay += random.uniform(0, jitter)
+
+            logger.warning(
+                "{}, attempt {}/{}. Retrying in {:.2f}s...",
+                label,
+                attempt,
+                max_attempts,
+                delay,
+            )
+            trace_event(
+                stage="provider",
+                event="provider.retry.scheduled",
+                source="provider",
+                status_code=status,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                delay_s=round(delay, 3),
+            )
+            # Prefer Retry-After header when available (PRV-01)
+            self.set_blocked_from_response(int(delay), response=response)
+
+        return _before_sleep

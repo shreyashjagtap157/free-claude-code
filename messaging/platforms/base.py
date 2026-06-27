@@ -22,6 +22,19 @@ class CLISession(Protocol):
     @property
     def is_busy(self) -> bool: ...
 
+    # Auto-compact support
+    @property
+    def accumulated_tokens(self) -> int: ...
+
+    @property
+    def context_window(self) -> int: ...
+
+    def prepare_auto_compact_prompt(self, prompt: str) -> tuple[str, bool]: ...
+
+    def update_accumulated_tokens(
+        self, prompt: str, prompt_tokens: int | None = None
+    ) -> None: ...
+
 
 @runtime_checkable
 class SessionManagerInterface(Protocol):

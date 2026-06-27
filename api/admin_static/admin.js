@@ -32,6 +32,7 @@ function providerName(providerId) {
     ollama: "Ollama",
     kimi: "Kimi",
     wafer: "Wafer",
+    google: "Google AI Studio",
   };
   if (names[providerId]) return names[providerId];
   return providerId
@@ -76,7 +77,7 @@ async function load() {
   await refreshLocalStatus();
   updateDirtyState();
   showMessage("");
-  setInterval(refreshStats, 3000);
+  setInterval(refreshStats, 60000);
 }
 
 function updateHeader(status) {
@@ -94,7 +95,9 @@ function updateStatsUI(stats) {
   byId("statUptime").textContent = formatDuration(stats.uptime_seconds);
   byId("statTotalRequests").textContent = stats.total_requests;
   byId("statActiveRequests").textContent = stats.active_requests;
-  byId("statMemory").textContent = stats.memory_mb ? `${stats.memory_mb} MB` : "--";
+  byId("statMemory").textContent = stats.memory_mb
+    ? `${stats.memory_mb} MB`
+    : "--";
 }
 
 function formatDuration(seconds) {
@@ -118,7 +121,7 @@ async function refreshStats() {
 function renderNav(sections) {
   const nav = byId("sectionNav");
   const fragment = document.createDocumentFragment();
-  
+
   sections.forEach((section, index) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -136,12 +139,12 @@ function renderNav(sections) {
   nav.addEventListener("click", (e) => {
     const btn = e.target.closest(".nav-link");
     if (!btn) return;
-    
+
     document.querySelectorAll(".nav-link").forEach((link) => {
       link.classList.remove("active");
     });
     btn.classList.add("active");
-    
+
     const sectionId = btn.dataset.section;
     byId(`section-${sectionId}`).scrollIntoView({ behavior: "smooth" });
   });
@@ -150,7 +153,7 @@ function renderNav(sections) {
 function renderProviders(providerStatus) {
   const grid = byId("providerGrid");
   const fragment = document.createDocumentFragment();
-  
+
   providerStatus.forEach((provider, index) => {
     const card = document.createElement("article");
     card.className = "provider-card";
@@ -179,12 +182,14 @@ function renderProviders(providerStatus) {
     button.type = "button";
     button.className = "test-button";
     button.textContent = provider.kind === "local" ? "Test" : "Refresh models";
-    button.addEventListener("click", () => testProvider(provider.provider_id, button));
+    button.addEventListener("click", () =>
+      testProvider(provider.provider_id, button),
+    );
 
     card.append(title, meta, button);
     fragment.appendChild(card);
   });
-  
+
   grid.innerHTML = "";
   grid.appendChild(fragment);
 }
@@ -364,7 +369,9 @@ function changedValues() {
 function updateDirtyState() {
   const count = Object.keys(changedValues()).length;
   byId("dirtyState").textContent =
-    count === 0 ? "No changes" : `${count} unsaved change${count === 1 ? "" : "s"}`;
+    count === 0
+      ? "No changes"
+      : `${count} unsaved change${count === 1 ? "" : "s"}`;
   byId("applyButton").disabled = count === 0;
 }
 
@@ -407,7 +414,9 @@ async function apply() {
     }, 1600);
     return;
   }
-  const pending = restart.required ? restart.fields || [] : result.pending_fields || [];
+  const pending = restart.required
+    ? restart.fields || []
+    : result.pending_fields || [];
   await load();
   showMessage(
     pending.length
@@ -424,7 +433,12 @@ async function refreshLocalStatus() {
     const meta = provider.status_code
       ? `${provider.base_url} returned HTTP ${provider.status_code}`
       : provider.base_url;
-    updateProviderCard(provider.provider_id, provider.status, provider.label, meta);
+    updateProviderCard(
+      provider.provider_id,
+      provider.status,
+      provider.label,
+      meta,
+    );
   });
 }
 
@@ -445,11 +459,19 @@ async function testProvider(providerId, button) {
         result.models.slice(0, 3).join(", ") || "No models returned",
       );
       state.modelOptions = Array.from(
-        new Set([...state.modelOptions, ...result.models.map((model) => `${providerId}/${model}`)]),
+        new Set([
+          ...state.modelOptions,
+          ...result.models.map((model) => `${providerId}/${model}`),
+        ]),
       ).sort();
       syncModelDatalist();
     } else {
-      updateProviderCard(providerId, "offline", result.error_type, result.error_type);
+      updateProviderCard(
+        providerId,
+        "offline",
+        result.error_type,
+        result.error_type,
+      );
     }
   } finally {
     button.disabled = false;
@@ -465,7 +487,9 @@ function syncModelDatalist() {
     document.body.appendChild(datalist);
   }
   datalist.innerHTML = "";
-  state.modelOptions.forEach((model) => datalist.appendChild(option(model, model)));
+  state.modelOptions.forEach((model) =>
+    datalist.appendChild(option(model, model)),
+  );
 }
 
 function showMessage(message, kind = "") {

@@ -162,6 +162,69 @@ class TestCLISession:
         assert session.api_url == "http://localhost:8082/v1"
         assert not session.is_busy
 
+    def test_session_max_output_tokens_default_none(self):
+        """max_output_tokens defaults to None when not provided."""
+        from cli.session import CLISession
+
+        session = CLISession("/tmp", "http://localhost:8082/v1")
+        assert session.max_output_tokens is None
+
+    def test_session_max_output_tokens_set(self):
+        """max_output_tokens is stored and exposed via property when provided."""
+        from cli.session import CLISession
+
+        session = CLISession(
+            "/tmp",
+            "http://localhost:8082/v1",
+            max_output_tokens=8192,
+        )
+        assert session.max_output_tokens == 8192
+
+    def test_session_max_output_tokens_zero(self):
+        """max_output_tokens accepts 0 as a valid value."""
+        from cli.session import CLISession
+
+        session = CLISession(
+            "/tmp",
+            "http://localhost:8082/v1",
+            max_output_tokens=0,
+        )
+        assert session.max_output_tokens == 0
+
+    def test_child_env_includes_max_output_tokens_when_set(self):
+        """_build_child_env includes CLAUDE_CODE_MAX_OUTPUT_TOKENS when max_output_tokens is set."""
+        from cli.session import CLISession
+
+        session = CLISession(
+            "/tmp",
+            "http://localhost:8082/v1",
+            max_output_tokens=4096,
+        )
+        env = session._build_child_env()
+        assert env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] == "4096"
+
+    def test_child_env_omits_max_output_tokens_when_none(self):
+        """_build_child_env does not include CLAUDE_CODE_MAX_OUTPUT_TOKENS when max_output_tokens is None."""
+        from cli.session import CLISession
+
+        session = CLISession("/tmp", "http://localhost:8082/v1")
+        env = session._build_child_env()
+        assert "CLAUDE_CODE_MAX_OUTPUT_TOKENS" not in env
+
+    def test_child_env_includes_supports_vision_and_tools_when_set(self):
+        """_build_child_env includes vision/tools bool env vars formatted as lowercase strings."""
+        from cli.session import CLISession
+
+        session = CLISession(
+            "/tmp",
+            "http://localhost:8082/v1",
+            supports_vision=True,
+            supports_tools=False,
+        )
+        env = session._build_child_env()
+        assert env["CLAUDE_CODE_SUPPORTS_VISION"] == "true"
+        assert env["CLAUDE_CODE_SUPPORTS_TOOLS"] == "false"
+
     def test_session_extract_session_id(self):
         """Test session ID extraction from various event formats."""
         from cli.session import CLISession
@@ -654,3 +717,56 @@ class TestCLISessionManager:
         stats = manager.get_stats()
         assert stats["active_sessions"] == 0
         assert stats["pending_sessions"] == 0
+
+    @pytest.mark.asyncio
+    async def test_manager_max_output_tokens_default_none(self):
+        """max_output_tokens defaults to None in the created CLISession."""
+        from cli.manager import CLISessionManager
+
+        manager = CLISessionManager(
+            workspace_path="/tmp/test",
+            api_url="http://localhost:8082/v1",
+        )
+        session, _sid, _is_new = await manager.get_or_create_session()
+        assert session.max_output_tokens is None
+
+    @pytest.mark.asyncio
+    async def test_manager_max_output_tokens_forwarded_to_session(self):
+        """max_output_tokens set on manager is forwarded to the created CLISession."""
+        from cli.manager import CLISessionManager
+
+        manager = CLISessionManager(
+            workspace_path="/tmp/test",
+            api_url="http://localhost:8082/v1",
+            max_output_tokens=16384,
+        )
+        session, _sid, _is_new = await manager.get_or_create_session()
+        assert session.max_output_tokens == 16384
+
+    @pytest.mark.asyncio
+    async def test_manager_supports_vision_and_tools_forwarded(self):
+        """supports_vision and supports_tools are forwarded from manager to session."""
+        from cli.manager import CLISessionManager
+
+        manager = CLISessionManager(
+            workspace_path="/tmp/test",
+            api_url="http://localhost:8082/v1",
+            supports_vision=True,
+            supports_tools=False,
+        )
+        session, _sid, _is_new = await manager.get_or_create_session()
+        assert session.supports_vision is True
+        assert session.supports_tools is False
+
+    @pytest.mark.asyncio
+    async def test_manager_forwards_zero_max_output_tokens(self):
+        """max_output_tokens=0 is forwarded (not treated as falsy)."""
+        from cli.manager import CLISessionManager
+
+        manager = CLISessionManager(
+            workspace_path="/tmp/test",
+            api_url="http://localhost:8082/v1",
+            max_output_tokens=0,
+        )
+        session, _sid, _is_new = await manager.get_or_create_session()
+        assert session.max_output_tokens == 0

@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+from pydantic import SecretStr
+
 from smoke.lib.config import (
     ALL_TARGETS,
     DEFAULT_TARGETS,
@@ -23,10 +25,11 @@ def _settings(**overrides):
         "model_opus": None,
         "model_sonnet": None,
         "model_haiku": None,
-        "nvidia_nim_api_key": "",
-        "open_router_api_key": "",
-        "deepseek_api_key": "",
-        "wafer_api_key": "",
+        "nvidia_nim_api_key": SecretStr(""),
+        "open_router_api_key": SecretStr(""),
+        "deepseek_api_key": SecretStr(""),
+        "wafer_api_key": SecretStr(""),
+        "google_api_key": SecretStr(""),
         "lm_studio_base_url": "",
         "llamacpp_base_url": "",
         "ollama_base_url": "http://localhost:11434",
@@ -89,7 +92,7 @@ def test_provider_smoke_models_cover_configured_providers_independent_of_model_m
     config = _smoke_config(
         settings=_settings(
             model="ollama/llama3.1",
-            deepseek_api_key="deepseek-key",
+            deepseek_api_key=SecretStr("deepseek-key"),
             ollama_base_url="",
         )
     )
@@ -107,7 +110,7 @@ def test_wafer_provider_configuration_uses_api_key(monkeypatch) -> None:
         settings=_settings(
             model="ollama/llama3.1",
             ollama_base_url="",
-            wafer_api_key="wafer-key",
+            wafer_api_key=SecretStr("wafer-key"),
         )
     )
 
@@ -123,7 +126,7 @@ def test_provider_smoke_model_override_accepts_model_name_without_prefix(
     monkeypatch.setenv("FCC_SMOKE_MODEL_DEEPSEEK", "deepseek-reasoner")
     config = _smoke_config(
         settings=_settings(
-            deepseek_api_key="deepseek-key",
+            deepseek_api_key=SecretStr("deepseek-key"),
             ollama_base_url="",
         ),
         provider_matrix=frozenset({"deepseek"}),
@@ -142,8 +145,8 @@ def test_provider_smoke_model_override_accepts_owner_model_name(
     config = _smoke_config(
         settings=_settings(
             model="deepseek/deepseek-chat",
-            deepseek_api_key="",
-            nvidia_nim_api_key="nim-key",
+            deepseek_api_key=SecretStr(""),
+            nvidia_nim_api_key=SecretStr("nim-key"),
             ollama_base_url="",
         ),
         provider_matrix=frozenset({"nvidia_nim"}),
@@ -161,7 +164,7 @@ def test_provider_smoke_model_override_rejects_wrong_provider_prefix(
     monkeypatch.setenv("FCC_SMOKE_MODEL_DEEPSEEK", "ollama/llama3.1")
     config = _smoke_config(
         settings=_settings(
-            deepseek_api_key="deepseek-key",
+            deepseek_api_key=SecretStr("deepseek-key"),
             ollama_base_url="",
         ),
         provider_matrix=frozenset({"deepseek"}),
@@ -176,11 +179,11 @@ def test_provider_smoke_model_override_rejects_wrong_provider_prefix(
 
 
 def test_provider_smoke_matrix_filters_provider_catalog(monkeypatch) -> None:
-    monkeypatch.delenv("FCC_SMOKE_MODEL_DEEPSEEK", raising=False)
+    monkeypatch.delenv("FCC_SMOKE_MODEL_NVIDIA_NIM", raising=False)
     config = _smoke_config(
         settings=_settings(
-            deepseek_api_key="deepseek-key",
-            nvidia_nim_api_key="nim-key",
+            deepseek_api_key=SecretStr("deepseek-key"),
+            nvidia_nim_api_key=SecretStr("nim-key"),
             ollama_base_url="",
         ),
         provider_matrix=frozenset({"nvidia_nim"}),

@@ -343,8 +343,8 @@ class TestDiscordPlatform:
                 side_effect=_fake_start,
             ),
             patch(
-                "messaging.limiter.MessagingRateLimiter.get_instance",
-                new_callable=AsyncMock,
+                "messaging.limiter.get_messaging_rate_limiter",
+                return_value=AsyncMock(),
             ),
         ):
             await platform.start()

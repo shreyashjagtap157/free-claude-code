@@ -9,6 +9,7 @@ from contextlib import suppress
 
 import httpx
 from loguru import logger
+from pydantic import SecretStr
 
 from config.provider_catalog import (
     PROVIDER_CATALOG,
@@ -80,6 +81,12 @@ def _create_wafer(config: ProviderConfig, _settings: Settings) -> BaseProvider:
     return WaferProvider(config)
 
 
+def _create_google(config: ProviderConfig, _settings: Settings) -> BaseProvider:
+    from providers.google import GoogleProvider
+
+    return GoogleProvider(config)
+
+
 PROVIDER_FACTORIES: dict[str, ProviderFactory] = {
     "nvidia_nim": _create_nvidia_nim,
     "open_router": _create_open_router,
@@ -89,6 +96,7 @@ PROVIDER_FACTORIES: dict[str, ProviderFactory] = {
     "ollama": _create_ollama,
     "kimi": _create_kimi,
     "wafer": _create_wafer,
+    "google": _create_google,
 }
 
 if set(PROVIDER_DESCRIPTORS) != set(SUPPORTED_PROVIDER_IDS) or set(
@@ -112,7 +120,12 @@ def _credential_for(descriptor: ProviderDescriptor, settings: Settings) -> str:
     if descriptor.static_credential is not None:
         return descriptor.static_credential
     if descriptor.credential_attr:
-        return _string_attr(settings, descriptor.credential_attr)
+        value = getattr(settings, descriptor.credential_attr, "")
+        if isinstance(value, SecretStr):
+            return value.get_secret_value()
+        if isinstance(value, str):
+            return value
+        return ""
     return ""
 
 
@@ -135,7 +148,7 @@ def build_provider_config(
     base_url = _string_attr(
         settings, descriptor.base_url_attr, descriptor.default_base_url or ""
     )
-    proxy = _string_attr(settings, descriptor.proxy_attr)
+    proxy = _string_attr(settings, descriptor.proxy_attr) or None
     return ProviderConfig(
         api_key=credential,
         base_url=base_url or descriptor.default_base_url,
@@ -149,6 +162,8 @@ def build_provider_config(
         proxy=proxy,
         log_raw_sse_events=settings.log_raw_sse_events,
         log_api_error_tracebacks=settings.log_api_error_tracebacks,
+        max_connections=settings.provider_max_connections,
+        max_keepalive_connections=settings.provider_max_keepalive_connections,
     )
 
 
@@ -269,11 +284,17 @@ class ProviderRegistry:
         """Return a copy of cached raw provider model ids."""
         return dict(self._model_ids_by_provider)
 
+    def cached_model_info(
+        self, provider_id: str, model_id: str
+    ) -> ProviderModelInfo | None:
+        """Return the cached full model metadata, or ``None`` if unknown."""
+        return self._model_infos_by_provider.get(provider_id, {}).get(model_id)
+
     def cached_model_supports_thinking(
         self, provider_id: str, model_id: str
     ) -> bool | None:
         """Return cached thinking support when a provider exposes it."""
-        info = self._model_infos_by_provider.get(provider_id, {}).get(model_id)
+        info = self.cached_model_info(provider_id, model_id)
         if info is None:
             return None
         return info.supports_thinking
@@ -291,6 +312,11 @@ class ProviderRegistry:
                 ProviderModelInfo(
                     model_id=f"{provider_id}/{info.model_id}",
                     supports_thinking=info.supports_thinking,
+                    context_window=info.context_window,
+                    max_output_tokens=info.max_output_tokens,
+                    supports_vision=info.supports_vision,
+                    supports_tools=info.supports_tools,
+                    supports_streaming=info.supports_streaming,
                 )
                 for info in sorted(
                     provider_infos.values(), key=lambda item: item.model_id
@@ -365,12 +391,12 @@ class ProviderRegistry:
 
         try:
             results = await asyncio.wait_for(
-                asyncio.gather(*tasks.values(), return_exceptions=True), timeout=30.0
+                asyncio.gather(*tasks.values(), return_exceptions=True), timeout=10.0
             )
         except TimeoutError:
             for task in tasks.values():
                 task.cancel()
-            logger.warning("Provider model discovery timed out (30s)")
+            logger.warning("Provider model discovery timed out (10s)")
             return
 
         for (provider_id, _task), result in zip(tasks.items(), results, strict=True):
@@ -409,7 +435,7 @@ class ProviderRegistry:
             try:
                 results = await asyncio.wait_for(
                     asyncio.gather(*tasks.values(), return_exceptions=True),
-                    timeout=30.0,
+                    timeout=10.0,
                 )
             except TimeoutError:
                 for task in tasks.values():
@@ -418,7 +444,7 @@ class ProviderRegistry:
                     failures.extend(
                         _format_provider_query_failures(
                             refs_by_provider[pid],
-                            TimeoutError("Validation timed out (30s)"),
+                            TimeoutError("Validation timed out (10s)"),
                             settings,
                         )
                     )

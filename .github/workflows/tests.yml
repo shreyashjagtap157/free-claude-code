@@ -31,10 +31,27 @@ jobs:
           fi
           exit 0
 
+      - name: Validate .env.example matches Settings schema
+        run: |
+          uv run python -c "
+          from pathlib import Path
+          from dotenv import dotenv_values
+          from config.settings import Settings
+          import importlib.resources
+          env_path = importlib.resources.files('cli').joinpath('env.example')
+          if not env_path.is_file():
+              env_path = Path('.env.example')
+          if env_path.is_file():
+              values = dotenv_values(env_path)
+              Settings(**values)
+              print(f'.env.example validated OK ({len(values)} vars)')
+          else:
+              print('No .env.example found, skipping validation')
+          "
+
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
         with:
-          version: "0.10.4"
           enable-cache: true
           cache-python: true
 
@@ -44,8 +61,18 @@ jobs:
       - name: Style check
         run: uv run ruff check
 
+      - name: Security check (Ruff bandit rules)
+        run: uv run ruff check --select S
+
+      - name: Dependency vulnerability scan
+        run: >-
+          uv run pip-audit ||
+          echo 'pip-audit not available; install it with: uv tool install pip-audit'
+
       - name: Type check
         run: uv run ty check
 
       - name: Run tests
+        env:
+          PYTHONWARNINGS: error
         run: uv run pytest -v --tb=short

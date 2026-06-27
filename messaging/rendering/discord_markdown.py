@@ -4,16 +4,24 @@ Discord uses standard markdown: **bold**, *italic*, `code`, ```code block```.
 Used by the message handler and Discord platform adapter.
 """
 
-from markdown_it import MarkdownIt
+from functools import lru_cache
 
+from ._token_utils import get_attr, get_int_attr
 from .markdown_tables import normalize_gfm_tables
 
 # Discord escapes: \ * _ ` ~ | >
 DISCORD_SPECIAL = set("\\*_`~|>")
 
-_MD = MarkdownIt("commonmark", {"html": False, "breaks": False})
-_MD.enable("strikethrough")
-_MD.enable("table")
+
+@lru_cache(maxsize=1)
+def _get_markdown_it():
+    """Lazily create and cache the MarkdownIt parser (avoids eager import time cost)."""
+    from markdown_it import MarkdownIt
+
+    md = MarkdownIt("commonmark", {"html": False, "breaks": False})
+    md.enable("strikethrough")
+    md.enable("table")
+    return md
 
 
 def escape_discord(text: str) -> str:
@@ -52,13 +60,14 @@ def format_status(emoji: str, label: str, suffix: str | None = None) -> str:
     return base
 
 
+@lru_cache(maxsize=128)
 def render_markdown_to_discord(text: str) -> str:
     """Render common Markdown into Discord-compatible format."""
     if not text:
         return ""
 
     text = normalize_gfm_tables(text)
-    tokens = _MD.parse(text)
+    tokens = _get_markdown_it().parse(text)
 
     def render_inline_table_plain(children) -> str:
         out: list[str] = []
@@ -90,15 +99,7 @@ def render_markdown_to_discord(text: str) -> str:
             elif t == "code_inline":
                 out.append(f"`{escape_discord_code(tok.content)}`")
             elif t == "link_open":
-                href = ""
-                if tok.attrs:
-                    if isinstance(tok.attrs, dict):
-                        href = tok.attrs.get("href", "")
-                    else:
-                        for key, val in tok.attrs:
-                            if key == "href":
-                                href = val
-                                break
+                href = get_attr(tok.attrs, "href")
                 inner_tokens = []
                 i += 1
                 while i < len(children) and children[i].type != "link_close":
@@ -110,16 +111,8 @@ def render_markdown_to_discord(text: str) -> str:
                         link_text += child.content
                 out.append(f"[{escape_discord(link_text)}]({href})")
             elif t == "image":
-                href = ""
+                href = get_attr(tok.attrs, "src")
                 alt = tok.content or ""
-                if tok.attrs:
-                    if isinstance(tok.attrs, dict):
-                        href = tok.attrs.get("src", "")
-                    else:
-                        for key, val in tok.attrs:
-                            if key == "src":
-                                href = val
-                                break
                 if alt:
                     out.append(f"{escape_discord(alt)} ({href})")
                 else:
@@ -161,23 +154,7 @@ def render_markdown_to_discord(text: str) -> str:
                 list_stack.pop()
             out.append("\n")
         elif t == "ordered_list_open":
-            start = 1
-            if tok.attrs:
-                if isinstance(tok.attrs, dict):
-                    val = tok.attrs.get("start")
-                    if val is not None:
-                        try:
-                            start = int(val)
-                        except TypeError, ValueError:
-                            start = 1
-                else:
-                    for key, val in tok.attrs:
-                        if key == "start":
-                            try:
-                                start = int(val)
-                            except TypeError, ValueError:
-                                start = 1
-                            break
+            start = get_int_attr(tok.attrs, "start", 1)
             list_stack.append({"type": "ordered", "index": start})
         elif t == "ordered_list_close":
             if list_stack:

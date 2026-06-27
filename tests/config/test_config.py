@@ -167,7 +167,7 @@ class TestSettings:
 
         monkeypatch.setenv("WAFER_API_KEY", "wafer-key")
         settings = Settings()
-        assert settings.wafer_api_key == "wafer-key"
+        assert settings.wafer_api_key.get_secret_value() == "wafer-key"
 
     def test_per_model_thinking_from_env(self, monkeypatch):
         """Per-model thinking env vars are loaded into settings."""
@@ -211,7 +211,7 @@ class TestSettings:
         monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "process-token")
         monkeypatch.setitem(Settings.model_config, "env_file", ())
         settings = Settings()
-        assert settings.anthropic_auth_token == "process-token"
+        assert settings.anthropic_auth_token.get_secret_value() == "process-token"
         assert settings.uses_process_anthropic_auth_token() is True
 
     def test_empty_dotenv_anthropic_auth_token_overrides_process_env(
@@ -226,7 +226,7 @@ class TestSettings:
         monkeypatch.setitem(Settings.model_config, "env_file", (env_file,))
 
         settings = Settings()
-        assert settings.anthropic_auth_token == ""
+        assert settings.anthropic_auth_token.get_secret_value() == ""
         assert settings.uses_process_anthropic_auth_token() is False
 
     def test_dotenv_anthropic_auth_token_overrides_process_env(
@@ -244,7 +244,7 @@ class TestSettings:
         monkeypatch.setitem(Settings.model_config, "env_file", (env_file,))
 
         settings = Settings()
-        assert settings.anthropic_auth_token == "server-token"
+        assert settings.anthropic_auth_token.get_secret_value() == "server-token"
         assert settings.uses_process_anthropic_auth_token() is False
 
     def test_removed_nim_enable_thinking_raises(self, monkeypatch):
@@ -413,7 +413,8 @@ class TestSettingsOptionalStr:
 
         monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "abc123")
         s = Settings()
-        assert s.telegram_bot_token == "abc123"
+        assert s.telegram_bot_token is not None
+        assert s.telegram_bot_token.get_secret_value() == "abc123"
 
     def test_empty_allowed_user_id_to_none(self, monkeypatch):
         from config.settings import Settings
@@ -427,7 +428,8 @@ class TestSettingsOptionalStr:
 
         monkeypatch.setenv("DISCORD_BOT_TOKEN", "discord_token_123")
         s = Settings()
-        assert s.discord_bot_token == "discord_token_123"
+        assert s.discord_bot_token is not None
+        assert s.discord_bot_token.get_secret_value() == "discord_token_123"
 
     def test_empty_discord_bot_token_to_none(self, monkeypatch):
         from config.settings import Settings
@@ -444,11 +446,11 @@ class TestSettingsOptionalStr:
         assert s.allowed_discord_channels == "111,222,333"
 
     def test_messaging_platform_from_env(self, monkeypatch):
-        from config.settings import Settings
+        from config.settings import MessagingPlatform, Settings
 
         monkeypatch.setenv("MESSAGING_PLATFORM", "discord")
         s = Settings()
-        assert s.messaging_platform == "discord"
+        assert s.messaging_platform == MessagingPlatform.DISCORD
 
     def test_whisper_device_auto_rejected(self, monkeypatch):
         """WHISPER_DEVICE=auto raises ValidationError (auto removed)."""

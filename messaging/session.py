@@ -5,6 +5,7 @@ Provides persistent storage for mapping platform messages to Claude CLI session 
 and message trees for conversation continuation.
 """
 
+import asyncio
 import contextlib
 import json
 import os
@@ -39,7 +40,7 @@ class SessionStore:
         self._message_log: dict[str, list[dict[str, Any]]] = {}
         self._message_log_ids: dict[str, set[str]] = {}
         self._dirty = False
-        self._save_timer: threading.Timer | None = None
+        self._save_task: asyncio.Task | None = None
         self._save_debounce_secs = 0.5
         self._message_log_cap: int | None = message_log_cap
         self._load()
@@ -127,24 +128,33 @@ class SessionStore:
     def _schedule_save(self) -> None:
         """Schedule a debounced save. Caller must hold self._lock."""
         self._dirty = True
-        if self._save_timer is not None:
-            self._save_timer.cancel()
-            self._save_timer = None
-        self._save_timer = threading.Timer(
-            self._save_debounce_secs, self._save_from_timer
-        )
-        self._save_timer.daemon = True
-        self._save_timer.start()
+        self._cancel_save_task()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running event loop (e.g. during synchronous shutdown or testing).
+            self._save_task = None
+            return
+        self._save_task = loop.create_task(self._debounce_save())
 
-    def _save_from_timer(self) -> None:
-        """Timer callback: save if dirty. Runs in timer thread."""
+    def _cancel_save_task(self) -> None:
+        if self._save_task is not None and not self._save_task.done():
+            self._save_task.cancel()
+            self._save_task = None
+
+    async def _debounce_save(self) -> None:
+        """Wait for debounce period, then persist if still dirty."""
+        await asyncio.sleep(self._save_debounce_secs)
+        if asyncio.get_running_loop().is_closed():
+            return
+
         with self._lock:
             if not self._dirty:
-                self._save_timer = None
+                self._save_task = None
                 return
             snapshot = self._snapshot()
             self._dirty = False
-            self._save_timer = None
+            self._save_task = None
         try:
             self._write_data(snapshot)
         except Exception as e:
@@ -153,11 +163,9 @@ class SessionStore:
                 self._dirty = True
 
     def _flush_save(self) -> dict:
-        """Cancel pending timer and snapshot current state. Caller must hold self._lock.
+        """Cancel pending debounce task and snapshot current state. Caller must hold self._lock.
         Returns snapshot dict; caller must call _write_data(snapshot) outside the lock."""
-        if self._save_timer is not None:
-            self._save_timer.cancel()
-            self._save_timer = None
+        self._cancel_save_task()
         self._dirty = False
         return self._snapshot()
 

@@ -44,7 +44,7 @@ def map_error(
     if isinstance(e, openai.AuthenticationError):
         return AuthenticationError(message, raw_error=str(e))
     if isinstance(e, openai.RateLimitError):
-        limiter.set_blocked(60)
+        limiter.set_blocked_from_response(60, response=getattr(e, "response", None))
         return RateLimitError(message, raw_error=str(e))
     if isinstance(e, openai.BadRequestError):
         return InvalidRequestError(message, raw_error=str(e))
@@ -83,7 +83,7 @@ def map_error(
         if status in (401, 403):
             return AuthenticationError(message, raw_error=str(e))
         if status == 429:
-            limiter.set_blocked(60)
+            limiter.set_blocked_from_response(60, response=e.response)
             return RateLimitError(message, raw_error=str(e))
         if status == 400:
             return InvalidRequestError(message, raw_error=str(e))

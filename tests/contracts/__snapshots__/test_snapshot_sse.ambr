@@ -1,0 +1,437 @@
+# serializer version: 1
+# name: TestSSEBuilderOutput.test_emit_error_snapshot
+  '''
+  [
+    {
+      "event_type": "message_start"
+    },
+    {
+      "message": {
+        "content": [],
+        "id": "msg_snap_err2",
+        "model": "claude-sonnet-4-20250514",
+        "role": "assistant",
+        "stop_reason": null,
+        "stop_sequence": null,
+        "type": "message",
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 1
+        }
+      },
+      "type": "message_start"
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "content_block_start"
+    },
+    {
+      "content_block": {
+        "text": "",
+        "type": "text"
+      },
+      "index": 0,
+      "type": "content_block_start"
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "content_block_delta"
+    },
+    {
+      "delta": {
+        "text": "Model unavailable",
+        "type": "text_delta"
+      },
+      "index": 0,
+      "type": "content_block_delta"
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "content_block_stop"
+    },
+    {
+      "index": 0,
+      "type": "content_block_stop"
+    }
+  ]
+  '''
+# ---
+# name: TestSSEBuilderOutput.test_text_message_snapshot
+  '''
+  [
+    {
+      "event_type": "message_start"
+    },
+    {
+      "message": {
+        "content": [],
+        "id": "msg_snap_01",
+        "model": "claude-sonnet-4-20250514",
+        "role": "assistant",
+        "stop_reason": null,
+        "stop_sequence": null,
+        "type": "message",
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 1
+        }
+      },
+      "type": "message_start"
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "content_block_start"
+    },
+    {
+      "content_block": {
+        "text": "",
+        "type": "text"
+      },
+      "index": 0,
+      "type": "content_block_start"
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "content_block_delta"
+    },
+    {
+      "delta": {
+        "text": "Hello, this is a test message.",
+        "type": "text_delta"
+      },
+      "index": 0,
+      "type": "content_block_delta"
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "content_block_stop"
+    },
+    {
+      "index": 0,
+      "type": "content_block_stop"
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "message_delta"
+    },
+    {
+      "delta": {
+        "stop_reason": "end_turn",
+        "stop_sequence": null
+      },
+      "type": "message_delta",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 10
+      }
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "message_stop"
+    },
+    {
+      "type": "message_stop"
+    }
+  ]
+  '''
+# ---
+# name: TestSSEBuilderOutput.test_text_then_tool_snapshot
+  '''
+  [
+    {
+      "event_type": "message_start"
+    },
+    {
+      "message": {
+        "content": [],
+        "id": "msg_snap_02",
+        "model": "claude-sonnet-4-20250514",
+        "role": "assistant",
+        "stop_reason": null,
+        "stop_sequence": null,
+        "type": "message",
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 1
+        }
+      },
+      "type": "message_start"
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "content_block_start"
+    },
+    {
+      "content_block": {
+        "text": "",
+        "type": "text"
+      },
+      "index": 0,
+      "type": "content_block_start"
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "content_block_delta"
+    },
+    {
+      "delta": {
+        "text": "Let me check that.",
+        "type": "text_delta"
+      },
+      "index": 0,
+      "type": "content_block_delta"
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "content_block_stop"
+    },
+    {
+      "index": 0,
+      "type": "content_block_stop"
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "content_block_start"
+    },
+    {
+      "content_block": {
+        "id": "tu_01",
+        "input": {},
+        "name": "read_file",
+        "type": "tool_use"
+      },
+      "index": 1,
+      "type": "content_block_start"
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "content_block_delta"
+    },
+    {
+      "delta": {
+        "partial_json": "{\"path\":\"",
+        "type": "input_json_delta"
+      },
+      "index": 1,
+      "type": "content_block_delta"
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "content_block_delta"
+    },
+    {
+      "delta": {
+        "partial_json": "/tmp/test.txt\"}",
+        "type": "input_json_delta"
+      },
+      "index": 1,
+      "type": "content_block_delta"
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "content_block_stop"
+    },
+    {
+      "index": 1,
+      "type": "content_block_stop"
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "message_delta"
+    },
+    {
+      "delta": {
+        "stop_reason": "tool_use",
+        "stop_sequence": null
+      },
+      "type": "message_delta",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 15
+      }
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "message_stop"
+    },
+    {
+      "type": "message_stop"
+    }
+  ]
+  '''
+# ---
+# name: TestSSEBuilderOutput.test_thinking_then_text_snapshot
+  '''
+  [
+    {
+      "event_type": "message_start"
+    },
+    {
+      "message": {
+        "content": [],
+        "id": "msg_snap_03",
+        "model": "claude-sonnet-4-20250514",
+        "role": "assistant",
+        "stop_reason": null,
+        "stop_sequence": null,
+        "type": "message",
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 1
+        }
+      },
+      "type": "message_start"
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "content_block_start"
+    },
+    {
+      "content_block": {
+        "thinking": "",
+        "type": "thinking"
+      },
+      "index": 0,
+      "type": "content_block_start"
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "content_block_delta"
+    },
+    {
+      "delta": {
+        "thinking": "I need to reason about this.",
+        "type": "thinking_delta"
+      },
+      "index": 0,
+      "type": "content_block_delta"
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "content_block_stop"
+    },
+    {
+      "index": 0,
+      "type": "content_block_stop"
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "content_block_start"
+    },
+    {
+      "content_block": {
+        "text": "",
+        "type": "text"
+      },
+      "index": 1,
+      "type": "content_block_start"
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "content_block_delta"
+    },
+    {
+      "delta": {
+        "text": "Here is my answer.",
+        "type": "text_delta"
+      },
+      "index": 1,
+      "type": "content_block_delta"
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "content_block_stop"
+    },
+    {
+      "index": 1,
+      "type": "content_block_stop"
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "message_delta"
+    },
+    {
+      "delta": {
+        "stop_reason": "end_turn",
+        "stop_sequence": null
+      },
+      "type": "message_delta",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 20
+      }
+    },
+    {
+      "blank": true
+    },
+    {
+      "event_type": "message_stop"
+    },
+    {
+      "type": "message_stop"
+    }
+  ]
+  '''
+# ---
+# name: TestSSEBuilderOutput.test_top_level_error_snapshot
+  '''
+  event: error
+  data: {"type": "error", "error": {"type": "api_error", "message": "API rate limit exceeded"}}
+  
+  
+  '''
+# ---
+# name: TestSSEParsing.test_parse_error_sse
+  '[]'
+# ---
+# name: TestSSEParsing.test_parse_standard_sse
+  '[]'
+# ---

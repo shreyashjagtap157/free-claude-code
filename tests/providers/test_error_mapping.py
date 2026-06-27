@@ -3,6 +3,7 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import httpx
 import openai
 import pytest
 from httpx import ReadTimeout, Request, Response
@@ -56,7 +57,24 @@ class TestMapError:
             result = map_error(exc)
             assert isinstance(result, RateLimitError)
             assert result.status_code == 429
-            mock_instance.set_blocked.assert_called_once_with(60)
+            mock_instance.set_blocked_from_response.assert_called_once_with(
+                60, response=exc.response
+            )
+
+    def test_rate_limit_error_retry_after_header(self):
+        """openai.RateLimitError with Retry-After header uses header value."""
+        response = Response(
+            429, request=Request("POST", "http://test"), headers={"Retry-After": "30"}
+        )
+        exc = openai.RateLimitError("rate limited", response=response, body={})
+        with patch("providers.error_mapping.GlobalRateLimiter") as mock_rl:
+            mock_instance = MagicMock()
+            mock_rl.get_instance.return_value = mock_instance
+            result = map_error(exc)
+            assert isinstance(result, RateLimitError)
+            mock_instance.set_blocked_from_response.assert_called_once_with(
+                60, response=response
+            )
 
     def test_bad_request_error(self):
         """openai.BadRequestError -> InvalidRequestError."""
@@ -119,6 +137,23 @@ class TestMapError:
         )
         result = map_error(exc)
         assert isinstance(result, APIError)
+
+    def test_httpx_429_with_retry_after(self):
+        """httpx.HTTPStatusError 429 with Retry-After passes header to limiter."""
+        response = Response(
+            429, request=Request("POST", "http://test"), headers={"Retry-After": "45"}
+        )
+        exc = httpx.HTTPStatusError(
+            "rate limited", request=response.request, response=response
+        )
+        with patch("providers.error_mapping.GlobalRateLimiter") as mock_rl:
+            mock_instance = MagicMock()
+            mock_rl.get_instance.return_value = mock_instance
+            result = map_error(exc)
+            assert isinstance(result, RateLimitError)
+            mock_instance.set_blocked_from_response.assert_called_once_with(
+                60, response=response
+            )
 
     def test_unmapped_exception_passthrough(self):
         """Non-openai exceptions are returned as-is."""

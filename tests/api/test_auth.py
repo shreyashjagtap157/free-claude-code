@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from api.app import create_app
 from api.dependencies import get_settings
@@ -12,7 +13,7 @@ app = create_app()
 def test_anthropic_auth_token_required_and_accepts_x_api_key():
     client = TestClient(app)
     settings = Settings()
-    settings.anthropic_auth_token = "s3cr3t"
+    settings.anthropic_auth_token = SecretStr("s3cr3t")
     app.dependency_overrides[get_settings] = lambda: settings
 
     payload = {
@@ -38,7 +39,7 @@ def test_anthropic_auth_token_required_and_accepts_x_api_key():
 def test_anthropic_auth_token_accepts_bearer_authorization():
     client = TestClient(app)
     settings = Settings()
-    settings.anthropic_auth_token = "b3artoken"
+    settings.anthropic_auth_token = SecretStr("b3artoken")
     app.dependency_overrides[get_settings] = lambda: settings
 
     payload = {
@@ -62,7 +63,7 @@ def test_anthropic_auth_token_accepts_bearer_authorization():
 def test_anthropic_auth_token_applies_to_models_endpoint():
     client = TestClient(app)
     settings = Settings()
-    settings.anthropic_auth_token = "models-token"
+    settings.anthropic_auth_token = SecretStr("models-token")
     app.dependency_overrides[get_settings] = lambda: settings
 
     r = client.get("/v1/models")
@@ -78,7 +79,7 @@ def test_anthropic_auth_token_applies_to_models_endpoint():
 def test_root_get_requires_auth_but_root_probes_are_public():
     client = TestClient(app)
     settings = Settings()
-    settings.anthropic_auth_token = "root-token"
+    settings.anthropic_auth_token = SecretStr("root-token")
     app.dependency_overrides[get_settings] = lambda: settings
 
     response = client.get("/")

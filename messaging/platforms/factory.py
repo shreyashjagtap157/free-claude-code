@@ -12,6 +12,8 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+from config.settings import MessagingPlatform as MessagingPlatformEnum
+
 from .base import MessagingPlatform
 
 
@@ -48,56 +50,58 @@ def create_messaging_platform(
         Configured :class:`MessagingPlatform` instance, or None if not configured.
     """
     opts = options or MessagingPlatformOptions()
-    if platform_type == "none":
-        logger.info("Messaging platform disabled by configuration")
-        return None
-
-    if platform_type == "telegram":
-        bot_token = opts.telegram_bot_token
-        if not bot_token:
-            logger.info("No Telegram bot token configured, skipping platform setup")
+    match platform_type:
+        case MessagingPlatformEnum.NONE:
+            logger.info("Messaging platform disabled by configuration")
             return None
 
-        from .telegram import TelegramPlatform
+        case MessagingPlatformEnum.TELEGRAM:
+            bot_token = opts.telegram_bot_token
+            if not bot_token:
+                logger.info("No Telegram bot token configured, skipping platform setup")
+                return None
 
-        return TelegramPlatform(
-            bot_token=bot_token,
-            allowed_user_id=opts.allowed_telegram_user_id,
-            voice_note_enabled=opts.voice_note_enabled,
-            whisper_model=opts.whisper_model,
-            whisper_device=opts.whisper_device,
-            hf_token=opts.hf_token,
-            nvidia_nim_api_key=opts.nvidia_nim_api_key,
-            messaging_rate_limit=opts.messaging_rate_limit,
-            messaging_rate_window=opts.messaging_rate_window,
-            log_raw_messaging_content=opts.log_raw_messaging_content,
-            log_api_error_tracebacks=opts.log_api_error_tracebacks,
-        )
+            from .telegram import TelegramPlatform
 
-    if platform_type == "discord":
-        bot_token = opts.discord_bot_token
-        if not bot_token:
-            logger.info("No Discord bot token configured, skipping platform setup")
+            return TelegramPlatform(
+                bot_token=bot_token,
+                allowed_user_id=opts.allowed_telegram_user_id,
+                voice_note_enabled=opts.voice_note_enabled,
+                whisper_model=opts.whisper_model,
+                whisper_device=opts.whisper_device,
+                hf_token=opts.hf_token,
+                nvidia_nim_api_key=opts.nvidia_nim_api_key,
+                messaging_rate_limit=opts.messaging_rate_limit,
+                messaging_rate_window=opts.messaging_rate_window,
+                log_raw_messaging_content=opts.log_raw_messaging_content,
+                log_api_error_tracebacks=opts.log_api_error_tracebacks,
+            )
+
+        case MessagingPlatformEnum.DISCORD:
+            bot_token = opts.discord_bot_token
+            if not bot_token:
+                logger.info("No Discord bot token configured, skipping platform setup")
+                return None
+
+            from .discord import DiscordPlatform
+
+            return DiscordPlatform(
+                bot_token=bot_token,
+                allowed_channel_ids=opts.allowed_discord_channels,
+                voice_note_enabled=opts.voice_note_enabled,
+                whisper_model=opts.whisper_model,
+                whisper_device=opts.whisper_device,
+                hf_token=opts.hf_token,
+                nvidia_nim_api_key=opts.nvidia_nim_api_key,
+                messaging_rate_limit=opts.messaging_rate_limit,
+                messaging_rate_window=opts.messaging_rate_window,
+                log_raw_messaging_content=opts.log_raw_messaging_content,
+                log_api_error_tracebacks=opts.log_api_error_tracebacks,
+            )
+
+        case _:
+            logger.warning(
+                f"Unknown messaging platform: '{platform_type}'. "
+                "Supported: 'none', 'telegram', 'discord'"
+            )
             return None
-
-        from .discord import DiscordPlatform
-
-        return DiscordPlatform(
-            bot_token=bot_token,
-            allowed_channel_ids=opts.allowed_discord_channels,
-            voice_note_enabled=opts.voice_note_enabled,
-            whisper_model=opts.whisper_model,
-            whisper_device=opts.whisper_device,
-            hf_token=opts.hf_token,
-            nvidia_nim_api_key=opts.nvidia_nim_api_key,
-            messaging_rate_limit=opts.messaging_rate_limit,
-            messaging_rate_window=opts.messaging_rate_window,
-            log_raw_messaging_content=opts.log_raw_messaging_content,
-            log_api_error_tracebacks=opts.log_api_error_tracebacks,
-        )
-
-    logger.warning(
-        f"Unknown messaging platform: '{platform_type}'. "
-        "Supported: 'none', 'telegram', 'discord'"
-    )
-    return None

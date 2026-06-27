@@ -87,21 +87,29 @@ def _strip_message_reasoning_content(body: dict[str, Any]) -> bool:
     return removed
 
 
-def _sanitize_nim_schema_node(value: Any) -> tuple[bool, Any]:
+def _sanitize_nim_schema_node(
+    value: Any, *, _depth: int = 0, max_depth: int = 100
+) -> tuple[bool, Any]:
     """Remove boolean JSON Schema subschemas that hosted NIM rejects."""
+    if _depth >= max_depth:
+        return True, value
     if isinstance(value, bool):
         return False, None
     if isinstance(value, dict):
         sanitized: dict[str, Any] = {}
         for key, item in value.items():
             if key in _SCHEMA_VALUE_KEYS:
-                keep, sanitized_item = _sanitize_nim_schema_node(item)
+                keep, sanitized_item = _sanitize_nim_schema_node(
+                    item, _depth=_depth + 1, max_depth=max_depth
+                )
                 if keep:
                     sanitized[key] = sanitized_item
             elif key in _SCHEMA_LIST_KEYS and isinstance(item, list):
                 sanitized_items: list[Any] = []
                 for schema_item in item:
-                    keep, sanitized_item = _sanitize_nim_schema_node(schema_item)
+                    keep, sanitized_item = _sanitize_nim_schema_node(
+                        schema_item, _depth=_depth + 1, max_depth=max_depth
+                    )
                     if keep:
                         sanitized_items.append(sanitized_item)
                 if sanitized_items:
@@ -109,7 +117,9 @@ def _sanitize_nim_schema_node(value: Any) -> tuple[bool, Any]:
             elif key in _SCHEMA_MAP_KEYS and isinstance(item, dict):
                 sanitized_map: dict[str, Any] = {}
                 for map_key, schema_item in item.items():
-                    keep, sanitized_item = _sanitize_nim_schema_node(schema_item)
+                    keep, sanitized_item = _sanitize_nim_schema_node(
+                        schema_item, _depth=_depth + 1, max_depth=max_depth
+                    )
                     if keep:
                         sanitized_map[map_key] = sanitized_item
                 sanitized[key] = sanitized_map
@@ -119,7 +129,9 @@ def _sanitize_nim_schema_node(value: Any) -> tuple[bool, Any]:
     if isinstance(value, list):
         sanitized_items = []
         for item in value:
-            keep, sanitized_item = _sanitize_nim_schema_node(item)
+            keep, sanitized_item = _sanitize_nim_schema_node(
+                item, _depth=_depth + 1, max_depth=max_depth
+            )
             if keep:
                 sanitized_items.append(sanitized_item)
         return True, sanitized_items
@@ -147,21 +159,37 @@ def _make_nim_tool_parameter_alias(name: str, reserved: set[str]) -> str:
     return alias
 
 
-def _collect_nim_tool_property_names(value: Any) -> set[str]:
+def _collect_nim_tool_property_names(
+    value: Any, *, _depth: int = 0, max_depth: int = 100
+) -> set[str]:
     names: set[str] = set()
+    if _depth >= max_depth:
+        return names
     if isinstance(value, dict):
         properties = value.get("properties")
         if isinstance(properties, dict):
             for property_name, property_schema in properties.items():
                 if isinstance(property_name, str):
                     names.add(property_name)
-                names.update(_collect_nim_tool_property_names(property_schema))
+                names.update(
+                    _collect_nim_tool_property_names(
+                        property_schema, _depth=_depth + 1, max_depth=max_depth
+                    )
+                )
         for key, item in value.items():
             if key != "properties":
-                names.update(_collect_nim_tool_property_names(item))
+                names.update(
+                    _collect_nim_tool_property_names(
+                        item, _depth=_depth + 1, max_depth=max_depth
+                    )
+                )
     elif isinstance(value, list):
         for item in value:
-            names.update(_collect_nim_tool_property_names(item))
+            names.update(
+                _collect_nim_tool_property_names(
+                    item, _depth=_depth + 1, max_depth=max_depth
+                )
+            )
     return names
 
 
@@ -171,7 +199,11 @@ def _alias_nim_schema_property_names(
     reserved: set[str],
     alias_to_original: dict[str, str],
     original_to_alias: dict[str, str],
+    _depth: int = 0,
+    max_depth: int = 100,
 ) -> Any:
+    if _depth >= max_depth:
+        return value
     if isinstance(value, list):
         return [
             _alias_nim_schema_property_names(
@@ -179,6 +211,8 @@ def _alias_nim_schema_property_names(
                 reserved=reserved,
                 alias_to_original=alias_to_original,
                 original_to_alias=original_to_alias,
+                _depth=_depth + 1,
+                max_depth=max_depth,
             )
             for item in value
         ]
@@ -196,6 +230,8 @@ def _alias_nim_schema_property_names(
                 reserved=reserved,
                 alias_to_original=alias_to_original,
                 original_to_alias=original_to_alias,
+                _depth=_depth + 1,
+                max_depth=max_depth,
             )
             if isinstance(property_name, str) and _needs_nim_tool_parameter_alias(
                 property_name
@@ -227,6 +263,8 @@ def _alias_nim_schema_property_names(
             reserved=reserved,
             alias_to_original=alias_to_original,
             original_to_alias=original_to_alias,
+            _depth=_depth + 1,
+            max_depth=max_depth,
         )
     return aliased_value
 
@@ -354,14 +392,56 @@ def clone_body_without_reasoning_effort(body: dict[str, Any]) -> dict[str, Any] 
     return cloned_body
 
 
+def clone_body_without_system_role(body: dict[str, Any]) -> dict[str, Any] | None:
+    """Clone request body and merge system messages into the first user message.
+
+    Some NIM models reject ``role: "system"`` in the messages array.
+    """
+    messages = body.get("messages", [])
+    system_indices = [i for i, m in enumerate(messages) if m.get("role") == "system"]
+    if not system_indices:
+        return None
+
+    cloned = deepcopy(body)
+    msgs = cloned["messages"]
+
+    system_texts: list[str] = []
+    for i in reversed(system_indices):
+        msg = msgs.pop(i)
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            system_texts.extend(
+                block.get("text", "")
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+        elif isinstance(content, str):
+            system_texts.append(content)
+
+    if system_texts and msgs:
+        merged = "\n\n".join(system_texts)
+        first_user = next((m for m in msgs if m.get("role") == "user"), msgs[0])
+        existing = first_user.get("content", "")
+        first_user["content"] = f"{merged}\n\n{existing}" if existing else merged
+
+    return cloned
+
+
 def build_request_body(
     request_data: Any, nim: NimSettings, *, thinking_enabled: bool
 ) -> dict:
     """Build OpenAI-format request body from Anthropic request."""
+    system_msgs = [
+        m
+        for m in getattr(request_data, "messages", [])
+        if getattr(m, "role", "") == "system"
+    ]
     logger.debug(
-        "NIM_REQUEST: conversion start model={} msgs={}",
+        "NIM_REQUEST: conversion start model={} msgs={} system_msgs={} thinking={}",
         getattr(request_data, "model", "?"),
         len(getattr(request_data, "messages", [])),
+        len(system_msgs),
+        thinking_enabled,
     )
     try:
         body = build_base_request_body(
@@ -374,6 +454,9 @@ def build_request_body(
         raise InvalidRequestError(str(exc)) from exc
 
     _sanitize_nim_tool_schemas(body)
+
+    # NIM models do not support reasoning_effort; strip to avoid 400 on every request
+    body.pop("reasoning_effort", None)
 
     # NIM-specific max_tokens: cap against nim.max_tokens
     max_tokens = body.get("max_tokens") or getattr(request_data, "max_tokens", None)

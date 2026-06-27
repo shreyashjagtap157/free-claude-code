@@ -1,0 +1,23 @@
+# Free Claude Code CODEOWNERS
+# Each line is a file pattern followed by one or more owners.
+
+# Default owner for the entire repository
+* @ssjag
+
+# Security-critical areas
+config/settings.py @ssjag
+config/provider_catalog.py @ssjag
+api/dependencies.py @ssjag
+
+# Provider implementations
+providers/ @ssjag
+
+# Messaging platforms
+messaging/ @ssjag
+
+# API routes and services
+api/routes.py @ssjag
+api/services.py @ssjag
+
+# CI/CD
+.github/ @ssjag

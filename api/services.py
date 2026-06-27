@@ -17,9 +17,14 @@ from core.anthropic.sse import ANTHROPIC_SSE_RESPONSE_HEADERS
 from core.trace import api_messages_request_snapshot, trace_event, traced_async_stream
 from providers.base import BaseProvider
 from providers.exceptions import InvalidRequestError, ProviderError
+from providers.registry import ProviderRegistry
 
-from .model_router import ModelRouter
-from .models.anthropic import MessagesRequest, TokenCountRequest
+from .model_router import ModelRouter, ResolvedModel
+from .models.anthropic import (
+    ContentBlockImage,
+    MessagesRequest,
+    TokenCountRequest,
+)
 from .models.responses import TokenCountResponse
 from .optimization_handlers import try_optimizations
 from .web_tools.egress import WebFetchEgressPolicy
@@ -84,6 +89,20 @@ def _require_non_empty_messages(messages: list[Any]) -> None:
         raise InvalidRequestError("messages cannot be empty")
 
 
+def _request_contains_images(messages: list[Any]) -> bool:
+    """Return ``True`` if any message contains an ``image`` content block."""
+    for msg in messages:
+        content = getattr(msg, "content", None)
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, ContentBlockImage):
+                return True
+            if isinstance(block, dict) and block.get("type") == "image":
+                return True
+    return False
+
+
 class ClaudeProxyService:
     """Coordinate request optimization, model routing, token count, and providers."""
 
@@ -93,18 +112,63 @@ class ClaudeProxyService:
         provider_getter: ProviderGetter,
         model_router: ModelRouter | None = None,
         token_counter: TokenCounter = get_token_count,
+        provider_registry: ProviderRegistry | None = None,
     ):
         self._settings = settings
         self._provider_getter = provider_getter
         self._model_router = model_router or ModelRouter(settings)
         self._token_counter = token_counter
+        self._provider_registry = provider_registry
+
+    def _check_vision_support(
+        self, request: MessagesRequest, resolved: ResolvedModel
+    ) -> None:
+        """Reject requests with image content when the resolved model lacks vision support.
+
+        Uses cached ``ProviderModelInfo`` from the registry to determine
+        whether the model supports vision. Silently passes when:
+        - The request contains no image blocks
+        - The registry cache has no metadata for this model (unknown = allow)
+        - The model is known to support vision (``supports_vision=True``)
+
+        Raises:
+            InvalidRequestError: When images are present and the model
+                explicitly does not support vision (``supports_vision=False``).
+        """
+        if self._provider_registry is None:
+            return
+
+        messages = getattr(request, "messages", None)
+        if not messages:
+            return
+
+        if not _request_contains_images(messages):
+            return
+
+        info = self._provider_registry.cached_model_info(
+            resolved.provider_id, resolved.provider_model
+        )
+        if info is None:
+            return
+        if info.supports_vision is not False:
+            return
+
+        raise InvalidRequestError(
+            f"Model '{resolved.provider_model}' (provider: {resolved.provider_id}) "
+            f"does not support image inputs. The request contains image blocks "
+            f"but this model has ``supports_vision=False``. Use a vision-capable model "
+            f"or remove the image content."
+        )
 
     def create_message(self, request_data: MessagesRequest) -> object:
         """Create a message response or streaming response."""
+        request_id = f"req_{uuid.uuid4().hex[:12]}"
         try:
             _require_non_empty_messages(request_data.messages)
 
             routed = self._model_router.resolve_messages_request(request_data)
+            self._check_vision_support(routed.request, routed.resolved)
+
             if routed.resolved.provider_id in _OPENAI_CHAT_UPSTREAM_IDS:
                 tool_err = openai_chat_upstream_server_tool_error(
                     routed.request,
@@ -164,9 +228,9 @@ class ClaudeProxyService:
                 provider_model_ref=routed.resolved.provider_model_ref,
                 gateway_model=routed.request.model,
                 thinking_enabled=routed.resolved.thinking_enabled,
+                request_id=request_id,
             )
 
-            request_id = f"req_{uuid.uuid4().hex[:12]}"
             with logger.contextualize(request_id=request_id):
                 trace_event(
                     stage="ingress",
@@ -174,6 +238,7 @@ class ClaudeProxyService:
                     source="api",
                     message_count=len(routed.request.messages),
                     snapshot=api_messages_request_snapshot(routed.request),
+                    request_id=request_id,
                 )
 
                 if self._settings.log_raw_api_payloads:
@@ -211,11 +276,15 @@ class ClaudeProxyService:
             raise
         except Exception as e:
             _log_unexpected_service_exception(
-                self._settings, e, context="CREATE_MESSAGE_ERROR"
+                self._settings,
+                e,
+                context="CREATE_MESSAGE_ERROR",
+                request_id=request_id,
             )
             raise HTTPException(
                 status_code=_http_status_for_unexpected_service_exception(e),
                 detail=get_user_facing_error_message(e),
+                headers={"X-Request-ID": request_id},
             ) from e
 
     def count_tokens(self, request_data: TokenCountRequest) -> TokenCountResponse:
@@ -259,4 +328,5 @@ class ClaudeProxyService:
                 raise HTTPException(
                     status_code=_http_status_for_unexpected_service_exception(e),
                     detail=get_user_facing_error_message(e),
+                    headers={"X-Request-ID": request_id},
                 ) from e

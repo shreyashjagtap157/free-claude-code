@@ -21,14 +21,16 @@ class ProviderConfig(BaseModel):
     base_url: str | None = None
     rate_limit: int | None = None
     rate_window: int = 60
-    max_concurrency: int = 5
+    max_concurrency: int = 3
     http_read_timeout: float = 300.0
     http_write_timeout: float = 10.0
     http_connect_timeout: float = HTTP_CONNECT_TIMEOUT_DEFAULT
     enable_thinking: bool = True
-    proxy: str = ""
+    proxy: str | None = None
     log_raw_sse_events: bool = False
     log_api_error_tracebacks: bool = False
+    max_connections: int = 50
+    max_keepalive_connections: int = 20
 
 
 class BaseProvider(ABC):
@@ -111,12 +113,23 @@ class BaseProvider(ABC):
                 "{}_ERROR:{} {}: {}", tag, req_tag, type(error).__name__, error
             )
             return
+
+        error_body = getattr(error, "body", None)
+        upstream_message = ""
+        if isinstance(error_body, dict):
+            err = error_body.get("error") or error_body
+            if isinstance(err, dict):
+                upstream_message = err.get("message", "") or str(err.get("code", ""))
+        if not upstream_message:
+            upstream_message = str(error)[:200]
+
         logger.error(
-            "{}_ERROR:{} exc_type={} http_status={}",
+            '{}_ERROR:{} exc_type={} http_status={} upstream="{}"',
             tag,
             req_tag,
             type(error).__name__,
             http_status,
+            upstream_message,
         )
 
     @abstractmethod

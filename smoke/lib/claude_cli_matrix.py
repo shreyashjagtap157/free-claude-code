@@ -120,8 +120,10 @@ def run_claude_cli(
     env["ANTHROPIC_BASE_URL"] = server.base_url
     env["ANTHROPIC_API_URL"] = f"{server.base_url}/v1"
     env.setdefault("ANTHROPIC_API_KEY", "sk-smoke-proxy")
-    if config.settings.anthropic_auth_token:
-        env["ANTHROPIC_AUTH_TOKEN"] = config.settings.anthropic_auth_token
+    if config.settings.anthropic_auth_token.get_secret_value():
+        env["ANTHROPIC_AUTH_TOKEN"] = (
+            config.settings.anthropic_auth_token.get_secret_value()
+        )
     env["TERM"] = "dumb"
     env["NO_COLOR"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"

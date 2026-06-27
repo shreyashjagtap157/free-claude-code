@@ -5,7 +5,17 @@ import time
 import pytest
 import pytest_asyncio
 
-from messaging.limiter import MessagingRateLimiter
+import messaging.limiter
+from messaging.limiter import get_messaging_rate_limiter
+
+
+async def _shutdown_and_clear() -> None:
+    try:
+        old = get_messaging_rate_limiter()
+        await old.shutdown(timeout=0.1)
+    except RuntimeError, ValueError:
+        pass
+    messaging.limiter.get_messaging_rate_limiter.cache_clear()
 
 
 class TestMessagingRateLimiter:
@@ -13,24 +23,29 @@ class TestMessagingRateLimiter:
 
     @pytest_asyncio.fixture(autouse=True)
     async def reset_limiter(self):
-        """Reset singleton before each test."""
-        await MessagingRateLimiter.shutdown_instance(timeout=0.1)
+        """Shutdown any cached instance and clear cache before each test."""
+        try:
+            old = get_messaging_rate_limiter()
+            await old.shutdown(timeout=0.1)
+        except RuntimeError, ValueError:
+            pass
+        messaging.limiter.get_messaging_rate_limiter.cache_clear()
 
         yield
 
-        await MessagingRateLimiter.shutdown_instance(timeout=0.1)
+        try:
+            old = get_messaging_rate_limiter()
+            await old.shutdown(timeout=0.1)
+        except RuntimeError, ValueError:
+            pass
+        messaging.limiter.get_messaging_rate_limiter.cache_clear()
 
     @pytest.mark.asyncio
     async def test_singleton_pattern(self):
-        """Test that get_instance returns the same object."""
-        limiter1 = await MessagingRateLimiter.get_instance(
-            rate_limit=1, rate_window=0.5
-        )
-        limiter2 = await MessagingRateLimiter.get_instance(
-            rate_limit=99, rate_window=99.0
-        )
+        """Test that get_messaging_rate_limiter returns the same object for same args."""
+        limiter1 = get_messaging_rate_limiter(rate_limit=1, rate_window=0.5)
+        limiter2 = get_messaging_rate_limiter(rate_limit=1, rate_window=0.5)
         assert limiter1 is limiter2
-        # First-construction wins for rate parameters
         assert limiter1.limiter._rate_limit == 1
         assert limiter1.limiter._rate_window == 0.5
 
@@ -40,8 +55,8 @@ class TestMessagingRateLimiter:
         Verify multiple rapid requests with same dedup_key are compacted.
         Logic ported from verify_limiter.py
         """
-        await MessagingRateLimiter.shutdown_instance(timeout=0.1)
-        limiter = await MessagingRateLimiter.get_instance(rate_limit=1, rate_window=1.0)
+        await _shutdown_and_clear()
+        limiter = get_messaging_rate_limiter(rate_limit=1, rate_window=1.0)
 
         call_counts = {}
 
@@ -71,8 +86,8 @@ class TestMessagingRateLimiter:
         Verify that even when compacted, all futures resolve to the result of the LAST execution.
         Logic ported from verify_limiter_v2.py
         """
-        await MessagingRateLimiter.shutdown_instance(timeout=0.1)
-        limiter = await MessagingRateLimiter.get_instance(rate_limit=1, rate_window=0.5)
+        await _shutdown_and_clear()
+        limiter = get_messaging_rate_limiter(rate_limit=1, rate_window=0.5)
 
         call_counts = {}
         msg_id = "test_msg_hang"
@@ -107,8 +122,8 @@ class TestMessagingRateLimiter:
     @pytest.mark.asyncio
     async def test_flood_wait_handling(self):
         """Test that FloodWait exceptions pause the worker."""
-        await MessagingRateLimiter.shutdown_instance(timeout=0.1)
-        limiter = await MessagingRateLimiter.get_instance(rate_limit=1, rate_window=1.0)
+        await _shutdown_and_clear()
+        limiter = get_messaging_rate_limiter(rate_limit=1, rate_window=1.0)
 
         # Mock exception with .seconds attribute
         class FloodWait(Exception):
@@ -148,8 +163,8 @@ class TestMessagingRateLimiter:
     @pytest.mark.asyncio
     async def test_flood_wait_retry_after_parsing(self):
         """Error message with 'retry after N' parses the wait seconds."""
-        await MessagingRateLimiter.shutdown_instance(timeout=0.1)
-        limiter = await MessagingRateLimiter.get_instance(rate_limit=1, rate_window=1.0)
+        await _shutdown_and_clear()
+        limiter = get_messaging_rate_limiter(rate_limit=1, rate_window=1.0)
 
         async def mock_flood():
             raise Exception("Flood wait: retry after 2 seconds")
@@ -163,8 +178,8 @@ class TestMessagingRateLimiter:
     @pytest.mark.asyncio
     async def test_non_flood_exception_no_pause(self):
         """Non-flood exception doesn't trigger pause."""
-        await MessagingRateLimiter.shutdown_instance(timeout=0.1)
-        limiter = await MessagingRateLimiter.get_instance(rate_limit=1, rate_window=1.0)
+        await _shutdown_and_clear()
+        limiter = get_messaging_rate_limiter(rate_limit=1, rate_window=1.0)
 
         async def mock_error():
             raise ValueError("some regular error")
@@ -178,8 +193,8 @@ class TestMessagingRateLimiter:
     @pytest.mark.asyncio
     async def test_flood_with_seconds_attribute(self):
         """Exception with .seconds attribute uses that value for pause."""
-        await MessagingRateLimiter.shutdown_instance(timeout=0.1)
-        limiter = await MessagingRateLimiter.get_instance(rate_limit=1, rate_window=1.0)
+        await _shutdown_and_clear()
+        limiter = get_messaging_rate_limiter(rate_limit=1, rate_window=1.0)
 
         class FloodWaitCustom(Exception):
             def __init__(self):
@@ -200,8 +215,8 @@ class TestMessagingRateLimiter:
         Proactive limiter should enforce a strict sliding window:
         for any i, t[i+rate_limit] - t[i] >= rate_window (within tolerance).
         """
-        await MessagingRateLimiter.shutdown_instance(timeout=0.1)
-        limiter = await MessagingRateLimiter.get_instance(rate_limit=2, rate_window=0.5)
+        await _shutdown_and_clear()
+        limiter = get_messaging_rate_limiter(rate_limit=2, rate_window=0.5)
 
         async def acquire(i: int) -> float:
             async def _do() -> float:
@@ -224,8 +239,8 @@ class TestMessagingRateLimiter:
     @pytest.mark.asyncio
     async def test_compaction_last_task_fails_all_futures_get_exception(self):
         """When compacted task's last func fails, all futures get the exception."""
-        await MessagingRateLimiter.shutdown_instance(timeout=0.1)
-        limiter = await MessagingRateLimiter.get_instance(rate_limit=1, rate_window=1.0)
+        await _shutdown_and_clear()
+        limiter = get_messaging_rate_limiter(rate_limit=1, rate_window=1.0)
 
         async def ok_task():
             return "ok"
@@ -244,8 +259,8 @@ class TestMessagingRateLimiter:
     @pytest.mark.asyncio
     async def test_fire_and_forget_failure_logged(self, caplog):
         """fire_and_forget with failing task logs error and does not re-raise."""
-        await MessagingRateLimiter.shutdown_instance(timeout=0.1)
-        limiter = await MessagingRateLimiter.get_instance(rate_limit=1, rate_window=1.0)
+        await _shutdown_and_clear()
+        limiter = get_messaging_rate_limiter(rate_limit=1, rate_window=1.0)
 
         async def fail_task():
             raise ValueError("fire_and_forget failed")

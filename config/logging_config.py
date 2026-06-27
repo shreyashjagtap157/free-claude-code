@@ -6,15 +6,30 @@ Context vars (request_id, node_id, chat_id) from contextualize() are
 included at top level for easy grep/filter.
 """
 
+import atexit
 import json
 import logging
 import re
+import sys
 import threading
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
-_configured = False
+
+# Use orjson for faster JSON serialization when available (3-6x faster than stdlib json).
+def _fast_json_dumps(obj: dict[str, Any], *, default: Any = str) -> str:
+    """JSON-serialize *obj*, preferring orjson when available."""
+    try:
+        _orjson = __import__("orjson")
+        return _orjson.dumps(obj, default=default).decode()
+    except ImportError:
+        return json.dumps(obj, default=default)
+
+
+_configured: bool = False
+_configure_lock: threading.Lock = threading.Lock()
 
 # Loguru ``logger.bind()`` key used by structured TRACE payloads; ``core/trace.py``
 # uses the identical string constant ``TRACE_PAYLOAD_BINDING``.
@@ -30,27 +45,20 @@ _CONTEXT_KEYS = (
     "http_path",
 )
 
-_TELEGRAM_BOT_RE = re.compile(
-    r"(https?://api\.telegram\.org/)bot([0-9]+:[A-Za-z0-9_-]+)(/?)",
-    re.IGNORECASE,
-)
-# Authorization: Bearer <token> (HTTP client / proxy debug lines)
-_AUTH_BEARER_RE = re.compile(
-    r"(\bAuthorization\s*:\s*Bearer\s+)([^\s'\"]+)",
-    re.IGNORECASE,
+_SENSITIVE_DATA_RE = re.compile(
+    r"(https?://api\.telegram\.org/)bot[^:\s/]+"
+    r"|(\b[Aa]uthorization\s*:\s*[Bb]earer\s+)[^\s'\"]+",
 )
 
 
 def _redact_sensitive_substrings(message: str) -> str:
     """Remove obvious API tokens and secrets before JSON log line emission."""
-    # Fast path: most log lines do not contain either marker, so skip two regex
-    # scans and the extra string allocation unless the line looks suspicious.
-    lowered = message.lower()
-    if "api.telegram.org" not in lowered and "authorization" not in lowered:
+    if not _SENSITIVE_DATA_RE.search(message):
         return message
-
-    text = _TELEGRAM_BOT_RE.sub(r"\1bot<redacted>\3", message)
-    return _AUTH_BEARER_RE.sub(r"\1<redacted>", text)
+    return _SENSITIVE_DATA_RE.sub(
+        lambda m: m.group(1) + "***" if m.group(1) else m.group(2) + "***",
+        message,
+    )
 
 
 def _serialize_with_context(record) -> str:
@@ -76,7 +84,7 @@ def _serialize_with_context(record) -> str:
                 continue
             out[tk] = tv
         out["trace"] = True
-    record["_json"] = json.dumps(out, default=str)
+    record["_json"] = _fast_json_dumps(out, default=str)
     return "{_json}\n"
 
 
@@ -124,7 +132,10 @@ def configure_logging(
     global _configured
     if _configured and not force:
         return
-    _configured = True
+    with _configure_lock:
+        if _configured and not force:
+            return
+        _configured = True
 
     # Remove default loguru handler (writes to stderr)
     logger.remove()
@@ -141,6 +152,19 @@ def configure_logging(
         mode="a",
         rotation="50 MB",
         enqueue=True,
+        diagnose=False,
+        backtrace=False,
+    )
+    atexit.register(logger.complete)
+
+    # Console sink: INFO level, plain text
+    logger.add(
+        sys.stderr,
+        level="INFO",
+        format="<level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+        colorize=True,
+        diagnose=False,
+        backtrace=False,
     )
 
     # Intercept stdlib logging: route all root logger output to loguru
