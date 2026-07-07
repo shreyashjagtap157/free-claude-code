@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import patch
+
+import pytest
 from fastapi.testclient import TestClient
 
 from api.app import create_app
@@ -8,18 +9,8 @@ from api.app import create_app
 @pytest.fixture
 def client():
     with patch("api.app.get_settings") as mock_settings:
-        mock_settings.return_value.parsed_cors_origins = [
-            "http://localhost:8080",
-            "http://127.0.0.1:3000",
-            "http://[::1]:5173",
-            "https://localhost",
-        ]
-        mock_settings.return_value.cors_origins = [
-            "http://localhost:8080",
-            "http://127.0.0.1:3000",
-            "http://[::1]:5173",
-            "https://localhost",
-        ]
+        mock_settings.return_value.parsed_cors_origins = ["http://localhost:8080", "http://127.0.0.1:3000", "http://[::1]:5173", "https://localhost"]
+        mock_settings.return_value.cors_origins = ["http://localhost:8080", "http://127.0.0.1:3000", "http://[::1]:5173", "https://localhost"]
         mock_settings.return_value.allowed_hosts = ["*"]
         mock_settings.return_value.parsed_trusted_hosts = ["*"]
         mock_settings.return_value.log_file = "test.log"
