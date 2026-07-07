@@ -9,12 +9,16 @@ def test_cors_middleware_wildcard():
     # Test with wildcard origins
     with patch("api.app.get_settings") as mock_settings:
         mock_settings.return_value.cors_origins = ["*"]
+        mock_settings.return_value.parsed_cors_origins = ["*"]
+        mock_settings.return_value.parsed_cors_origins = ["*"]
         mock_settings.return_value.allowed_hosts = ["*"]
+        mock_settings.return_value.parsed_trusted_hosts = ["*"]
+        mock_settings.return_value.parsed_trusted_hosts = ["*"]
         mock_settings.return_value.log_file = "test.log"
         mock_settings.return_value.log_raw_api_payloads = False
 
         app = create_app(lifespan_enabled=False)
-        client = TestClient(app)
+        client = TestClient(app, base_url="http://127.0.0.1:50000")
 
         response = client.options(
             "/",
@@ -30,12 +34,16 @@ def test_cors_middleware_wildcard():
 def test_cors_middleware_restricted():
     with patch("api.app.get_settings") as mock_settings:
         mock_settings.return_value.cors_origins = ["http://trusted.com"]
+        mock_settings.return_value.parsed_cors_origins = ["http://trusted.com"]
+        mock_settings.return_value.parsed_cors_origins = ["http://trusted.com"]
         mock_settings.return_value.allowed_hosts = ["*"]
+        mock_settings.return_value.parsed_trusted_hosts = ["*"]
+        mock_settings.return_value.parsed_trusted_hosts = ["*"]
         mock_settings.return_value.log_file = "test.log"
         mock_settings.return_value.log_raw_api_payloads = False
 
         app = create_app(lifespan_enabled=False)
-        client = TestClient(app)
+        client = TestClient(app, base_url="http://127.0.0.1:50000")
 
         # Allowed origin
         response = client.options(
@@ -64,12 +72,16 @@ def test_cors_middleware_restricted():
 def test_trusted_host_middleware_wildcard():
     with patch("api.app.get_settings") as mock_settings:
         mock_settings.return_value.cors_origins = ["*"]
+        mock_settings.return_value.parsed_cors_origins = ["*"]
+        mock_settings.return_value.parsed_cors_origins = ["*"]
         mock_settings.return_value.allowed_hosts = ["*"]
+        mock_settings.return_value.parsed_trusted_hosts = ["*"]
+        mock_settings.return_value.parsed_trusted_hosts = ["*"]
         mock_settings.return_value.log_file = "test.log"
         mock_settings.return_value.log_raw_api_payloads = False
 
         app = create_app(lifespan_enabled=False)
-        client = TestClient(app)
+        client = TestClient(app, base_url="http://127.0.0.1:50000")
 
         response = client.get("/", headers={"Host": "anyhost.com"})
         assert response.status_code in (200, 404)
@@ -78,12 +90,16 @@ def test_trusted_host_middleware_wildcard():
 def test_trusted_host_middleware_restricted():
     with patch("api.app.get_settings") as mock_settings:
         mock_settings.return_value.cors_origins = ["*"]
+        mock_settings.return_value.parsed_cors_origins = ["*"]
+        mock_settings.return_value.parsed_cors_origins = ["*"]
         mock_settings.return_value.allowed_hosts = ["trustedhost.com"]
+        mock_settings.return_value.parsed_trusted_hosts = ["trustedhost.com"]
+        mock_settings.return_value.parsed_trusted_hosts = ["trustedhost.com"]
         mock_settings.return_value.log_file = "test.log"
         mock_settings.return_value.log_raw_api_payloads = False
 
         app = create_app(lifespan_enabled=False)
-        client = TestClient(app)
+        client = TestClient(app, base_url="http://127.0.0.1:50000")
 
         response = client.get("/", headers={"Host": "trustedhost.com"})
         assert response.status_code in (200, 404)
