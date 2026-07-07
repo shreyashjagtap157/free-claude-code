@@ -22,3 +22,6 @@
 ## 2024-05-25 - Avoid Eager Dictionary Allocation in High-Frequency Streams
 **Learning:** In high-frequency loops, such as parsing SSE stream chunks, using `dict.get("key", {})` creates a new empty dictionary object on *every single iteration* when the key does not exist. This results in significant unnecessary memory allocation and garbage collection overhead.
 **Action:** Replace `dict.get("key", {})` with `dict.get("key")` (which returns `None`) in hot loops. If an object requires subsequent dictionary access, use a strict `None` check (`if val is None: val = {}`) or rely on truthiness (`isinstance(val, dict)` evaluates to `False` for `None`) to safely handle missing keys without fallback allocation.
+## 2024-05-25 - Avoid Eager Dictionary and List Allocations in High-Frequency Paths
+**Learning:** In high-frequency parsing paths, calling `.get("key", [])` or `.get("key", {})` allocates an empty list or dict object every time the key is missing, leading to unnecessary memory allocation and garbage collection overhead.
+**Action:** Replace `dict.get("key", [])` with `dict.get("key")` (which returns `None`) and follow it with a strict `None` check or an `isinstance(content, list)` check to avoid the fallback allocation entirely.
