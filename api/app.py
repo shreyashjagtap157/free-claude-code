@@ -102,11 +102,7 @@ def create_app(*, lifespan_enabled: bool = True) -> FastAPI:
         app_kwargs["lifespan"] = lifespan
     app = FastAPI(**app_kwargs)
 
-    # Order matters: middlewares are added from inside out.
-    # Adding TrustedHostMiddleware last makes it the outermost middleware to fail fast.
-    app.add_middleware(
-        TrustedHostMiddleware, allowed_hosts=settings.parsed_trusted_hosts
-    )
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     app.add_middleware(
         CORSMiddleware,
@@ -116,7 +112,11 @@ def create_app(*, lifespan_enabled: bool = True) -> FastAPI:
         allow_headers=["*"],
     )
 
-    app.add_middleware(GZipMiddleware, minimum_size=1000)
+    # Order matters: middlewares are added from inside out.
+    # Adding TrustedHostMiddleware last makes it the outermost middleware to fail fast.
+    app.add_middleware(
+        TrustedHostMiddleware, allowed_hosts=settings.parsed_trusted_hosts
+    )
 
     # Pre-calculated security headers (Optimization: ⚡ 1-10)
     SECURITY_HEADERS = {
@@ -234,6 +234,11 @@ def create_app(*, lifespan_enabled: bool = True) -> FastAPI:
             tool_names=tool_names,
         )
         return await request_validation_exception_handler(request, exc)
+
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=settings.allowed_hosts,
+    )
 
     @app.exception_handler(ProviderError)
     async def provider_error_handler(request: Request, exc: ProviderError):

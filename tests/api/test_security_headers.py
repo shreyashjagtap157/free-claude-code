@@ -1,4 +1,5 @@
 import pytest
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from api.app import create_app
@@ -6,13 +7,25 @@ from api.app import create_app
 
 @pytest.fixture
 def client():
-    from unittest.mock import patch
     with patch("api.app.get_settings") as mock_settings:
-        mock_settings.return_value.parsed_cors_origins = ["http://localhost:8080", "http://127.0.0.1:3000", "http://[::1]:5173", "https://localhost"]
+        mock_settings.return_value.parsed_cors_origins = [
+            "http://localhost:8080",
+            "http://127.0.0.1:3000",
+            "http://[::1]:5173",
+            "https://localhost",
+        ]
+        mock_settings.return_value.cors_origins = [
+            "http://localhost:8080",
+            "http://127.0.0.1:3000",
+            "http://[::1]:5173",
+            "https://localhost",
+        ]
+        mock_settings.return_value.allowed_hosts = ["*"]
         mock_settings.return_value.parsed_trusted_hosts = ["*"]
+        mock_settings.return_value.log_file = "test.log"
+        mock_settings.return_value.log_raw_api_payloads = False
         app = create_app(lifespan_enabled=False)
         return TestClient(app, base_url="http://127.0.0.1:50000")
-
 
 
 def test_security_headers(client):
@@ -69,6 +82,4 @@ def test_cors_blocked_origins(client, origin):
     response = client.options(
         "/", headers={"Origin": origin, "Access-Control-Request-Method": "GET"}
     )
-    # FastAPI CORSMiddleware generally passes through unauthorized options requests,
-    # or responds with 400. In either case it should NOT reflect the origin back
     assert response.headers.get("access-control-allow-origin") != origin
