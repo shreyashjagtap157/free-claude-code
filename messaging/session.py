@@ -209,7 +209,9 @@ class SessionStore:
 
             # Optional cap to prevent unbounded growth if configured.
             if self._message_log_cap is not None and self._message_log_cap > 0:
-                items = self._message_log.get(chat_key, [])
+                items = self._message_log.get(chat_key)
+                if items is None:
+                    items = []
                 if len(items) > self._message_log_cap:
                     num_to_drop = len(items) - self._message_log_cap
                     dropped = items[:num_to_drop]
@@ -225,7 +227,9 @@ class SessionStore:
         """Get all recorded message IDs for a chat (in insertion order)."""
         chat_key = self._make_chat_key(str(platform), str(chat_id))
         with self._lock:
-            items = self._message_log.get(chat_key, [])
+            items = self._message_log.get(chat_key)
+            if items is None:
+                items = []
             return [
                 str(x.get("message_id"))
                 for x in items

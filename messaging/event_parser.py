@@ -50,7 +50,9 @@ def parse_cli_event(event: Any, *, log_raw_cli: bool = False) -> list[dict]:
             msg_obj = {"content": event.get("content")}
 
     if msg_obj and isinstance(msg_obj, dict):
-        content = msg_obj.get("content", [])
+        content = msg_obj.get("content")
+        if content is None:
+            content = []
         if isinstance(content, list):
             # Preserve order exactly as content blocks appear.
             for c in content:
