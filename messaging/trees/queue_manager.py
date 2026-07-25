@@ -177,9 +177,12 @@ class TreeRepository:
     def from_dict(cls, data: dict) -> TreeRepository:
         """Deserialize from dictionary."""
         repo = cls()
-        for root_id, tree_data in data.get("trees", {}).items():
-            repo._trees[root_id] = MessageTree.from_dict(tree_data)
-        repo._node_to_tree = data.get("node_to_tree", {})
+        trees_data = data.get("trees")
+        if trees_data is not None:
+            for root_id, tree_data in trees_data.items():
+                repo._trees[root_id] = MessageTree.from_dict(tree_data)
+        node_to_tree = data.get("node_to_tree")
+        repo._node_to_tree = node_to_tree if node_to_tree is not None else {}
         return repo
 
 

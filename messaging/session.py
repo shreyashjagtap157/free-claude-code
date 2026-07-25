@@ -261,8 +261,10 @@ class SessionStore:
             self._trees[root_id] = tree_data
 
             # Update node-to-tree mapping
-            for node_id in tree_data.get("nodes", {}):
-                self._node_to_tree[node_id] = root_id
+            nodes = tree_data.get("nodes")
+            if nodes is not None:
+                for node_id in nodes:
+                    self._node_to_tree[node_id] = root_id
 
             self._schedule_save()
             logger.debug(f"Saved tree {root_id}")
@@ -290,8 +292,10 @@ class SessionStore:
         with self._lock:
             tree_data = self._trees.pop(root_id, None)
             if tree_data:
-                for node_id in tree_data.get("nodes", {}):
-                    self._node_to_tree.pop(node_id, None)
+                nodes = tree_data.get("nodes")
+                if nodes is not None:
+                    for node_id in nodes:
+                        self._node_to_tree.pop(node_id, None)
                 self._schedule_save()
 
     def get_all_trees(self) -> dict[str, dict]:
