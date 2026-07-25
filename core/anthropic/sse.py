@@ -239,7 +239,8 @@ class SSEBuilder:
         elif block_type == "tool_use":
             content_block["id"] = kwargs.get("id", "")
             content_block["name"] = kwargs.get("name", "")
-            content_block["input"] = kwargs.get("input", {})
+            val = kwargs.get("input")
+            content_block["input"] = val if val is not None else {}
 
         return self._format_event(
             "content_block_start",
