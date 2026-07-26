@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from api.app import create_app
 from config.settings import Settings
 
+
 @pytest.fixture
 def client(monkeypatch):
     def mock_get_settings():
@@ -11,9 +12,11 @@ def client(monkeypatch):
             cors_origins=["*"],
             allowed_hosts=["*"],
         )
+
     monkeypatch.setattr("api.app.get_settings", mock_get_settings)
     app = create_app(lifespan_enabled=False)
     return TestClient(app, base_url="http://127.0.0.1:50000")
+
 
 def test_security_headers(client):
     response = client.get("/")  # Any route works
@@ -38,6 +41,7 @@ def test_security_headers(client):
     assert "form-action 'self'" in csp
     assert "base-uri 'self'" in csp
 
+
 @pytest.mark.parametrize(
     "origin",
     [
@@ -53,6 +57,7 @@ def test_cors_allowed_origins(client, origin):
     )
     assert response.status_code == 200
     assert response.headers.get("access-control-allow-origin") == "*"
+
 
 @pytest.mark.parametrize(
     "origin",

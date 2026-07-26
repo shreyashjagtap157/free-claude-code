@@ -116,4 +116,4 @@ class TestNimSettingsValidators:
     def test_parse_optional_int_error(self):
         """Test parse_optional_int raises error for invalid input."""
         with pytest.raises(ValidationError, match="seed must be an int or empty/None"):
-            NimSettings(seed="abc") # type: ignore
+            NimSettings.model_validate({"seed": "abc"})
