@@ -14,7 +14,7 @@ def test_cors_middleware_wildcard():
         mock_settings.return_value.log_raw_api_payloads = False
 
         app = create_app(lifespan_enabled=False)
-        client = TestClient(app)
+        client = TestClient(app, base_url="http://127.0.0.1:50000")
 
         response = client.options(
             "/",
@@ -35,7 +35,7 @@ def test_cors_middleware_restricted():
         mock_settings.return_value.log_raw_api_payloads = False
 
         app = create_app(lifespan_enabled=False)
-        client = TestClient(app)
+        client = TestClient(app, base_url="http://127.0.0.1:50000")
 
         # Allowed origin
         response = client.options(
@@ -69,7 +69,7 @@ def test_trusted_host_middleware_wildcard():
         mock_settings.return_value.log_raw_api_payloads = False
 
         app = create_app(lifespan_enabled=False)
-        client = TestClient(app)
+        client = TestClient(app, base_url="http://127.0.0.1:50000")
 
         response = client.get("/", headers={"Host": "anyhost.com"})
         assert response.status_code in (200, 404)
@@ -83,7 +83,7 @@ def test_trusted_host_middleware_restricted():
         mock_settings.return_value.log_raw_api_payloads = False
 
         app = create_app(lifespan_enabled=False)
-        client = TestClient(app)
+        client = TestClient(app, base_url="http://127.0.0.1:50000")
 
         response = client.get("/", headers={"Host": "trustedhost.com"})
         assert response.status_code in (200, 404)
