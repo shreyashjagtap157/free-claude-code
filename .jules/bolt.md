@@ -22,3 +22,15 @@
 ## 2024-05-25 - Avoid Eager Dictionary Allocation in High-Frequency Streams
 **Learning:** In high-frequency loops, such as parsing SSE stream chunks, using `dict.get("key", {})` creates a new empty dictionary object on *every single iteration* when the key does not exist. This results in significant unnecessary memory allocation and garbage collection overhead.
 **Action:** Replace `dict.get("key", {})` with `dict.get("key")` (which returns `None`) in hot loops. If an object requires subsequent dictionary access, use a strict `None` check (`if val is None: val = {}`) or rely on truthiness (`isinstance(val, dict)` evaluates to `False` for `None`) to safely handle missing keys without fallback allocation.
+
+## 2024-05-25 - Avoid Eager Dictionary Allocation in High-Frequency Streams
+**Learning:** In high-frequency loops, such as parsing SSE stream chunks, using `dict.get("key", {})` creates a new empty dictionary object on *every single iteration* when the key does not exist. This results in significant unnecessary memory allocation and garbage collection overhead.
+**Action:** Replace `dict.get("key", {})` with `dict.get("key")` (which returns `None`) in hot loops. If an object requires subsequent dictionary access, use a strict `None` check (`if val is None: val = {}`) or rely on truthiness (`isinstance(val, dict)` evaluates to `False` for `None`) to safely handle missing keys without fallback allocation.
+
+## 2024-05-25 - Bypass json.loads Overhead with String Heuristics
+**Learning:** `json.loads` calls inside high-frequency SSE parsers are extremely expensive when repeatedly failing on incomplete stream chunks (e.g., throwing and catching `JSONDecodeError` 50+ times per JSON object).
+**Action:** Add a fast heuristic string check `if not buffer.strip().endswith("}"):` before invoking `json.loads` to avoid the overhead of exceptions and parsing attempts on structurally incomplete JSON data.
+
+## 2024-05-25 - Bypass json.loads Overhead with String Heuristics
+**Learning:** `json.loads` calls inside high-frequency SSE parsers are extremely expensive when repeatedly failing on incomplete stream chunks (e.g., throwing and catching `JSONDecodeError` 50+ times per JSON object).
+**Action:** Add a fast heuristic string check `if not buffer.strip().endswith("}"):` before invoking `json.loads` to avoid the overhead of exceptions and parsing attempts on structurally incomplete JSON data.

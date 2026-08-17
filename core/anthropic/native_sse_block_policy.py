@@ -180,6 +180,9 @@ def transform_native_sse_block_event(
     if not event_name or not data_text:
         return event
 
+    if not data_text.strip().endswith("}"):
+        return event
+
     try:
         payload = json.loads(data_text)
     except json.JSONDecodeError:
