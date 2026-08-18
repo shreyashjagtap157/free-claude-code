@@ -114,6 +114,12 @@ class ContentBlockManager:
             return None
 
         state.task_arg_buffer += args
+        # ⚡ Bolt Optimization: Fast string heuristic to avoid continually raising
+        # and catching JSONDecodeError on incomplete streaming JSON chunks.
+        # This reduces CPU overhead significantly in high-frequency SSE loops.
+        if not state.task_arg_buffer.strip().endswith("}"):
+            return None
+
         try:
             args_json = json.loads(state.task_arg_buffer)
         except Exception:
