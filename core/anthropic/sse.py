@@ -114,6 +114,12 @@ class ContentBlockManager:
             return None
 
         state.task_arg_buffer += args
+
+        # Performance optimization: fast heuristic check to avoid expensive
+        # json.JSONDecodeError exceptions on incomplete streaming chunks.
+        if not state.task_arg_buffer.strip().endswith("}"):
+            return None
+
         try:
             args_json = json.loads(state.task_arg_buffer)
         except Exception:
