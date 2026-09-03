@@ -547,11 +547,27 @@ class Settings(BaseSettings):
 
     @property
     def parsed_cors_origins(self) -> list[str]:
-        return [p.strip() for p in self.cors_origins.split(",") if p.strip()]
+        return [
+            p.strip()
+            for p in (
+                self.cors_origins
+                if isinstance(self.cors_origins, list)
+                else self.cors_origins.split(",")
+            )
+            if p.strip()
+        ]
 
     @property
     def parsed_trusted_hosts(self) -> list[str]:
-        return [p.strip() for p in self.trusted_hosts.split(",") if p.strip()]
+        return [
+            p.strip()
+            for p in (
+                self.trusted_hosts
+                if isinstance(self.trusted_hosts, list)
+                else self.trusted_hosts.split(",")
+            )
+            if p.strip()
+        ]
 
     @staticmethod
     def parse_provider_type(model_string: str) -> str:
