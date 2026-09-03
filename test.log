@@ -1,0 +1,6 @@
+{"time": "2026-09-03 03:52:40.116776+00:00", "level": "DEBUG", "message": "Using selector: EpollSelector", "module": "logging", "function": "callHandlers", "line": 1737}
+{"time": "2026-09-03 03:52:40.118596+00:00", "level": "DEBUG", "message": "Using selector: EpollSelector", "module": "logging", "function": "callHandlers", "line": 1737}
+{"time": "2026-09-03 03:52:40.118518+00:00", "level": "DEBUG", "message": "Using selector: EpollSelector", "module": "logging", "function": "callHandlers", "line": 1737}
+{"time": "2026-09-03 03:52:40.124999+00:00", "level": "DEBUG", "message": "Using selector: EpollSelector", "module": "logging", "function": "callHandlers", "line": 1737}
+{"time": "2026-09-03 03:52:40.120129+00:00", "level": "DEBUG", "message": "Using selector: EpollSelector", "module": "logging", "function": "callHandlers", "line": 1737}
+{"time": "2026-09-03 03:52:40.149016+00:00", "level": "DEBUG", "message": "Using selector: EpollSelector", "module": "logging", "function": "callHandlers", "line": 1737}
