@@ -1,116 +1,5 @@
-"""Centralized configuration using Pydantic Settings."""
-
-import os
-from collections.abc import Mapping
-from dataclasses import dataclass
-from functools import lru_cache
-from pathlib import Path
-from typing import Any
-
-from dotenv import dotenv_values
-from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
-from .constants import HTTP_CONNECT_TIMEOUT_DEFAULT
-from .nim import NimSettings
-from .provider_ids import SUPPORTED_PROVIDER_IDS
-
-
-@dataclass(frozen=True, slots=True)
-class ConfiguredChatModelRef:
-    """A unique configured chat model reference and the env keys that set it."""
-
-    model_ref: str
-    provider_id: str
-    model_id: str
-    sources: tuple[str, ...]
-
-
-def _env_files() -> tuple[Path, ...]:
-    """Return env file paths in priority order (later overrides earlier)."""
-    files: list[Path] = [
-        Path(".env"),
-        Path.home() / ".config" / "free-claude-code" / ".env",
-    ]
-    if explicit := os.environ.get("FCC_ENV_FILE"):
-        files.append(Path(explicit))
-    return tuple(files)
-
-
-def _configured_env_files(model_config: Mapping[str, Any]) -> tuple[Path, ...]:
-    """Return the currently configured env files for Settings."""
-    configured = model_config.get("env_file")
-    if configured is None:
-        return ()
-    if isinstance(configured, (str, Path)):
-        return (Path(configured),)
-    return tuple(Path(item) for item in configured)
-
-
-@lru_cache(maxsize=128)
-def _env_file_contains_key(path: Path, key: str) -> bool:
-    """Cached dotenv key presence check (⚡ Bolt Optimization)."""
-    return _env_file_value(path, key) is not None
-
-
-@lru_cache(maxsize=128)
-def _env_file_value(path: Path, key: str) -> str | None:
-    """Cached dotenv value lookup (⚡ Bolt Optimization: 61-70)."""
-    if not path.is_file():
-        return None
-
-    try:
-        values = dotenv_values(path)
-    except OSError:
-        return None
-
-    if key not in values:
-        return None
-    value = values[key]
-    return "" if value is None else value
-
-
-def _env_file_override(model_config: Mapping[str, Any], key: str) -> str | None:
-    """Return the last configured dotenv value that explicitly defines a key."""
-    configured_value: str | None = None
-    for env_file in _configured_env_files(model_config):
-        value = _env_file_value(env_file, key)
-        if value is not None:
-            configured_value = value
-    return configured_value
-
-
-def _removed_env_var_message(model_config: Mapping[str, Any]) -> str | None:
-    """Return a migration error for removed env vars, if present."""
-    removed_keys = ("NIM_ENABLE_THINKING", "ENABLE_THINKING")
-    replacement = (
-        "ENABLE_MODEL_THINKING, ENABLE_OPUS_THINKING, "
-        "ENABLE_SONNET_THINKING, or ENABLE_HAIKU_THINKING"
-    )
-
-    for removed_key in removed_keys:
-        if removed_key in os.environ:
-            return (
-                f"{removed_key} has been removed in this release. "
-                f"Rename it to {replacement}."
-            )
-
-        for env_file in _configured_env_files(model_config):
-            if _env_file_contains_key(env_file, removed_key):
-                return (
-                    f"{removed_key} has been removed in this release. "
-                    f"Rename it to {replacement}. Found in {env_file}."
-                )
-
-    return None
-
-
-class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
-
     cors_origins: list[str] = Field(default=["*"], validation_alias="CORS_ORIGINS")
     allowed_hosts: list[str] = Field(default=["*"], validation_alias="ALLOWED_HOSTS")
-    trusted_hosts: list[str] = Field(default=["*"], validation_alias="TRUSTED_HOSTS")
 
     # ==================== OpenRouter Config ====================
     open_router_api_key: str = Field(default="", validation_alias="OPENROUTER_API_KEY")
@@ -290,6 +179,11 @@ class Settings(BaseSettings):
     # Hugging Face token for faster model downloads (optional, for local Whisper)
     hf_token: str = Field(default="", validation_alias="HF_TOKEN")
 
+
+    # ==================== Security Config ====================
+    cors_origins: list[str] = Field(default=["*"], validation_alias="CORS_ORIGINS")
+    trusted_hosts: list[str] = Field(default=["*"], validation_alias="TRUSTED_HOSTS")
+
     # ==================== Bot Wrapper Config ====================
 
     telegram_bot_token: str | None = None
@@ -311,10 +205,30 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8082
     log_file: str = "server.log"
+    cors_origins: list[str] = Field(default=["*"], validation_alias="CORS_ORIGINS")
+    allowed_hosts: list[str] = Field(default=["*"], validation_alias="ALLOWED_HOSTS")
     # Optional server API key to protect endpoints (Anthropic-style)
     # Set via env `ANTHROPIC_AUTH_TOKEN`. When empty, no auth is required.
     anthropic_auth_token: str = Field(
         default="", validation_alias="ANTHROPIC_AUTH_TOKEN"
+    )
+    cors_origins: list[str] = Field(
+        default=["*"], validation_alias="CORS_ORIGINS"
+    )
+    allowed_hosts: list[str] = Field(
+        default=["*"], validation_alias="ALLOWED_HOSTS"
+    )
+
+    # ==================== Security ====================
+    cors_origins: list[str] = Field(default=["*"], validation_alias="CORS_ORIGINS")
+    allowed_hosts: list[str] = Field(default=["*"], validation_alias="ALLOWED_HOSTS")
+
+    # ==================== Security ====================
+    cors_origins: list[str] = Field(
+        default=["*"], validation_alias="CORS_ORIGINS"
+    )
+    allowed_hosts: list[str] = Field(
+        default=["*"], validation_alias="ALLOWED_HOSTS"
     )
 
     @model_validator(mode="before")
@@ -326,20 +240,19 @@ class Settings(BaseSettings):
         return data
 
     # Handle empty strings for optional string fields
-    @field_validator("cors_origins", "allowed_hosts", "trusted_hosts", mode="before")
+    @field_validator("cors_origins", "allowed_hosts", mode="before")
     @classmethod
-    def parse_cors_origins_and_hosts(cls, v: Any) -> list[str]:
+    def parse_comma_separated_list(cls, v: Any) -> list[str]:
         if isinstance(v, str):
             if not v.strip():
                 return ["*"]
             return [part.strip() for part in v.split(",") if part.strip()]
-        if isinstance(v, list):
-            return [str(part) for part in v]
         if not v:
             return ["*"]
-        return [str(v)]
+        return v
 
     @field_validator(
+
         "telegram_bot_token",
         "allowed_telegram_user_id",
         "discord_bot_token",
@@ -358,6 +271,17 @@ class Settings(BaseSettings):
             return None
         return v
 
+    @field_validator("cors_origins", "allowed_hosts", mode="before")
+    @classmethod
+    def parse_comma_separated_list(cls, v: Any) -> list[str]:
+        if not v:
+            return ["*"]
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            return [part.strip() for part in v.split(",") if part.strip()]
+        return ["*"]
+
     @field_validator("max_message_log_entries_per_chat", mode="before")
     @classmethod
     def parse_optional_log_cap(cls, v: Any) -> Any:
@@ -373,6 +297,17 @@ class Settings(BaseSettings):
                 f"whisper_device must be 'cpu', 'cuda', or 'nvidia_nim', got {v!r}"
             )
         return v
+
+    @field_validator("cors_origins", "allowed_hosts", mode="before")
+    @classmethod
+    def parse_comma_separated_list(cls, v: Any) -> list[str]:
+        if isinstance(v, str):
+            return [part.strip() for part in v.split(",") if part.strip()]
+        if isinstance(v, list):
+            return [str(part) for part in v]
+        if v is None:
+            return ["*"]
+        return [str(v)]
 
     @field_validator("messaging_platform")
     @classmethod
@@ -396,6 +331,17 @@ class Settings(BaseSettings):
         if v <= 0:
             raise ValueError("messaging_rate_window must be > 0")
         return float(v)
+
+    @field_validator("cors_origins", "allowed_hosts", mode="before")
+    @classmethod
+    def parse_comma_separated_list(cls, v: Any) -> list[str]:
+        if isinstance(v, str):
+            return [part.strip() for part in v.split(",") if part.strip()]
+        if isinstance(v, list):
+            return v
+        if v is None:
+            return ["*"]
+        raise ValueError("Must be a comma-separated string or a list of strings")
 
     @field_validator("web_fetch_allowed_schemes")
     @classmethod
@@ -534,34 +480,6 @@ class Settings(BaseSettings):
 
     @property
     def parsed_cors_origins(self) -> list[str]:
-        if isinstance(self.cors_origins, list):
-            return self.cors_origins
         return [p.strip() for p in self.cors_origins.split(",") if p.strip()]
 
     @property
-    def parsed_trusted_hosts(self) -> list[str]:
-        if isinstance(self.trusted_hosts, list):
-            return self.trusted_hosts
-        return [p.strip() for p in self.trusted_hosts.split(",") if p.strip()]
-
-    @staticmethod
-    def parse_provider_type(model_string: str) -> str:
-        """Extract provider type from any 'provider/model' string."""
-        return model_string.split("/", 1)[0]
-
-    @staticmethod
-    def parse_model_name(model_string: str) -> str:
-        """Extract model name from any 'provider/model' string."""
-        return model_string.split("/", 1)[1]
-
-    model_config = SettingsConfigDict(
-        env_file=_env_files(),
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
-
-
-@lru_cache
-def get_settings() -> Settings:
-    """Get cached settings instance."""
-    return Settings()
