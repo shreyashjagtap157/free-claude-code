@@ -114,12 +114,6 @@ class ContentBlockManager:
             return None
 
         state.task_arg_buffer += args
-        # Optimization: Avoid expensive exception handling during partial stream buffering.
-        # Valid JSON dictionaries always end with '}'. Checking this heuristically bypasses
-        # json.loads() calls on incomplete chunks, avoiding significant JSONDecodeError overhead.
-        if not state.task_arg_buffer.strip().endswith("}"):
-            return None
-
         try:
             args_json = json.loads(state.task_arg_buffer)
         except Exception:
