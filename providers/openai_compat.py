@@ -159,6 +159,12 @@ class OpenAIChatTransport(BaseProvider):
     def _restore_aliased_tool_arguments(
         self, argument_json: str, aliases: dict[str, str]
     ) -> str | None:
+        # Optimization: Avoid expensive exception handling during partial stream buffering.
+        # Valid JSON dictionaries always end with '}'. Checking this heuristically bypasses
+        # json.loads() calls on incomplete chunks, avoiding significant JSONDecodeError overhead.
+        if not argument_json.strip().endswith("}"):
+            return None
+
         try:
             parsed = json.loads(argument_json)
         except json.JSONDecodeError:
