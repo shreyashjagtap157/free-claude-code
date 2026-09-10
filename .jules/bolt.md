@@ -22,3 +22,7 @@
 ## 2024-05-25 - Avoid Eager Dictionary Allocation in High-Frequency Streams
 **Learning:** In high-frequency loops, such as parsing SSE stream chunks, using `dict.get("key", {})` creates a new empty dictionary object on *every single iteration* when the key does not exist. This results in significant unnecessary memory allocation and garbage collection overhead.
 **Action:** Replace `dict.get("key", {})` with `dict.get("key")` (which returns `None`) in hot loops. If an object requires subsequent dictionary access, use a strict `None` check (`if val is None: val = {}`) or rely on truthiness (`isinstance(val, dict)` evaluates to `False` for `None`) to safely handle missing keys without fallback allocation.
+
+## 2024-05-25 - Fix Multiple CORSMiddleware Overrides
+**Learning:** If multiple `CORSMiddleware` objects are added to a FastAPI/Starlette application, the outermost middleware (the last one added) completely handles preflight `OPTIONS` requests. If the outermost middleware uses a strict `allow_origin_regex` but no `allow_origins=["*"]`, it will block wildcard requests with a 400 Bad Request. When `allow_origins=["*"]` is present in a single middleware, Starlette unconditionally returns `*` instead of reflecting the origin.
+**Action:** Combine rules into a single `CORSMiddleware`. Ensure tests simulating generic behavior properly validate that either the exact matched origin or `*` is returned when wildcards are active.
