@@ -343,7 +343,7 @@ class Settings(BaseSettings):
     # Handle empty strings for optional string fields
     @field_validator("cors_origins", "allowed_hosts", mode="before")
     @classmethod
-    def parse_comma_separated_list(cls, v: Any) -> list[str]:
+    def parse_comma_separated_list_0(cls, v: Any) -> list[str]:
         if isinstance(v, str):
             if not v.strip():
                 return ["*"]
@@ -373,7 +373,7 @@ class Settings(BaseSettings):
 
     @field_validator("cors_origins", "allowed_hosts", mode="before")
     @classmethod
-    def parse_comma_separated_list(cls, v: Any) -> list[str]:
+    def parse_comma_separated_list_1(cls, v: Any) -> list[str]:
         if not v:
             return ["*"]
         if isinstance(v, list):
@@ -400,7 +400,7 @@ class Settings(BaseSettings):
 
     @field_validator("cors_origins", "allowed_hosts", mode="before")
     @classmethod
-    def parse_comma_separated_list(cls, v: Any) -> list[str]:
+    def parse_comma_separated_list_2(cls, v: Any) -> list[str]:
         if isinstance(v, str):
             return [part.strip() for part in v.split(",") if part.strip()]
         if isinstance(v, list):
@@ -434,7 +434,7 @@ class Settings(BaseSettings):
 
     @field_validator("cors_origins", "allowed_hosts", mode="before")
     @classmethod
-    def parse_comma_separated_list(cls, v: Any) -> list[str]:
+    def parse_comma_separated_list_3(cls, v: Any) -> list[str]:
         if isinstance(v, str):
             return [part.strip() for part in v.split(",") if part.strip()]
         if isinstance(v, list):
@@ -580,11 +580,19 @@ class Settings(BaseSettings):
 
     @property
     def parsed_cors_origins(self) -> list[str]:
-        return [p.strip() for p in self.cors_origins.split(",") if p.strip()]
+        return (
+            self.cors_origins
+            if isinstance(self.cors_origins, list)
+            else [p.strip() for p in self.cors_origins.split(",") if p.strip()]
+        )
 
     @property
     def parsed_trusted_hosts(self) -> list[str]:
-        return [p.strip() for p in self.trusted_hosts.split(",") if p.strip()]
+        return (
+            self.allowed_hosts
+            if isinstance(self.allowed_hosts, list)
+            else [p.strip() for p in self.allowed_hosts.split(",") if p.strip()]
+        )
 
     @staticmethod
     def parse_provider_type(model_string: str) -> str:
