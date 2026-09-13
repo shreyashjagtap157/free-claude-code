@@ -1,0 +1,8 @@
+{"time": "2026-09-13 03:20:02.299670+00:00", "level": "DEBUG", "message": "Using selector: EpollSelector", "module": "logging", "function": "callHandlers", "line": 1737}
+{"time": "2026-09-13 03:20:02.322927+00:00", "level": "DEBUG", "message": "Using selector: EpollSelector", "module": "logging", "function": "callHandlers", "line": 1737}
+{"time": "2026-09-13 03:20:02.351912+00:00", "level": "DEBUG", "message": "Using selector: EpollSelector", "module": "logging", "function": "callHandlers", "line": 1737}
+{"time": "2026-09-13 03:20:02.355427+00:00", "level": "DEBUG", "message": "Using selector: EpollSelector", "module": "logging", "function": "callHandlers", "line": 1737}
+{"time": "2026-09-13 03:20:02.371237+00:00", "level": "DEBUG", "message": "Using selector: EpollSelector", "module": "logging", "function": "callHandlers", "line": 1737}
+{"time": "2026-09-13 03:20:02.377867+00:00", "level": "DEBUG", "message": "Using selector: EpollSelector", "module": "logging", "function": "callHandlers", "line": 1737}
+{"time": "2026-09-13 03:20:02.383092+00:00", "level": "DEBUG", "message": "Using selector: EpollSelector", "module": "logging", "function": "callHandlers", "line": 1737}
+{"time": "2026-09-13 03:20:02.405860+00:00", "level": "DEBUG", "message": "Using selector: EpollSelector", "module": "logging", "function": "callHandlers", "line": 1737}
