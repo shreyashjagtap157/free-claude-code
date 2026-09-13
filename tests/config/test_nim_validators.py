@@ -1,5 +1,7 @@
 """Tests for NimSettings validators in config/nim.py"""
 
+from typing import cast
+
 import pytest
 from pydantic import ValidationError
 
@@ -116,4 +118,4 @@ class TestNimSettingsValidators:
     def test_parse_optional_int_error(self):
         """Test parse_optional_int raises error for invalid input."""
         with pytest.raises(ValidationError, match="seed must be an int or empty/None"):
-            NimSettings(seed="abc")
+            NimSettings(seed=cast(int, "abc"))
