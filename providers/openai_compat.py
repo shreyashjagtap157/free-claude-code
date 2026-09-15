@@ -159,6 +159,8 @@ class OpenAIChatTransport(BaseProvider):
     def _restore_aliased_tool_arguments(
         self, argument_json: str, aliases: dict[str, str]
     ) -> str | None:
+        if not argument_json.rstrip().endswith("}"):
+            return None
         try:
             parsed = json.loads(argument_json)
         except json.JSONDecodeError:
