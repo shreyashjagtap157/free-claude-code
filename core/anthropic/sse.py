@@ -114,6 +114,13 @@ class ContentBlockManager:
             return None
 
         state.task_arg_buffer += args
+
+        # ⚡ Bolt: Fast-path heuristic to avoid catching JSONDecodeError on every chunk
+        # Incomplete SSE JSON chunks lack the closing brace. Avoiding `json.loads` overhead
+        # on partial payloads makes processing high-frequency streams measurably faster.
+        if not state.task_arg_buffer or not state.task_arg_buffer.strip().endswith("}"):
+            return None
+
         try:
             args_json = json.loads(state.task_arg_buffer)
         except Exception:
