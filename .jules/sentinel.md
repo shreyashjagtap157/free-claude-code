@@ -31,3 +31,8 @@
 **Vulnerability:** Missing robust CORS validation and Host header verification logic (potential DNS rebinding vulnerability in non-local environments).
 **Learning:** By default, FastAPI does not automatically protect against cross-origin resource sharing or Host header spoofing issues unless specific middlewares are added. Relying purely on internal logic without explicit framework-level middleware protection creates security gaps.
 **Prevention:** Always implement `CORSMiddleware` and `TrustedHostMiddleware` and expose their configurations (e.g., `CORS_ORIGINS`, `ALLOWED_HOSTS`) securely through Pydantic settings with appropriate comma-separated list parsing for flexibility in deployment environments.
+
+## 2026-05-13 - Pydantic Validator Function Name Redefinition
+**Vulnerability:** Reusing the same function name for `@field_validator` on different fields in a Pydantic v2 `Settings` class causes previous validators to be silently overwritten, leading to bypasses in input validation (e.g., failing to parse comma-separated strings into lists), which can crash the application or open security gaps.
+**Learning:** Python's class namespace overwrites methods with identical names. Pydantic `@field_validator` decorators use the function name, not just the decorator arguments, to register the validator in the class namespace.
+**Prevention:** Always use unique function names for multiple `@field_validator` implementations within the same class, even if the logic is similar or identical, or consolidate them into a single validator handling multiple fields.
