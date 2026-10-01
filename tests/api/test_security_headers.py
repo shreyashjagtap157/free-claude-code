@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -6,8 +8,16 @@ from api.app import create_app
 
 @pytest.fixture
 def client():
-    app = create_app(lifespan_enabled=False)
-    return TestClient(app, base_url="http://127.0.0.1:50000")
+    with patch("api.app.get_settings") as mock_settings:
+        # Since cors_origins is tested with regex in CORSMiddleware,
+        # we need to set cors_origins to empty so that it falls back to allow_origin_regex
+        mock_settings.return_value.cors_origins = []
+        mock_settings.return_value.allowed_hosts = ["*"]
+        mock_settings.return_value.trusted_hosts = ["*"]
+        mock_settings.return_value.log_file = "test.log"
+        mock_settings.return_value.log_raw_api_payloads = False
+        app = create_app(lifespan_enabled=False)
+        return TestClient(app, base_url="http://127.0.0.1:50000")
 
 
 def test_security_headers(client):
@@ -34,32 +44,36 @@ def test_security_headers(client):
     assert "base-uri 'self'" in csp
 
 
-@pytest.mark.parametrize("origin", [
-    "http://localhost:8080",
-    "http://127.0.0.1:3000",
-    "http://[::1]:5173",
-    "https://localhost",
-])
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://localhost:8080",
+        "http://127.0.0.1:3000",
+        "http://[::1]:5173",
+        "https://localhost",
+    ],
+)
 def test_cors_allowed_origins(client, origin):
-    response = client.options("/", headers={
-        "Origin": origin,
-        "Access-Control-Request-Method": "GET"
-    })
+    response = client.options(
+        "/", headers={"Origin": origin, "Access-Control-Request-Method": "GET"}
+    )
     assert response.status_code == 200
     assert response.headers.get("access-control-allow-origin") == origin
 
 
-@pytest.mark.parametrize("origin", [
-    "http://evil.com",
-    "https://attacker.net",
-    "http://localhost.evil.com",
-    "http://127.0.0.1.attacker.com",
-])
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://evil.com",
+        "https://attacker.net",
+        "http://localhost.evil.com",
+        "http://127.0.0.1.attacker.com",
+    ],
+)
 def test_cors_blocked_origins(client, origin):
-    response = client.options("/", headers={
-        "Origin": origin,
-        "Access-Control-Request-Method": "GET"
-    })
+    response = client.options(
+        "/", headers={"Origin": origin, "Access-Control-Request-Method": "GET"}
+    )
     # FastAPI CORSMiddleware generally passes through unauthorized options requests,
     # or responds with 400. In either case it should NOT reflect the origin back
     assert response.headers.get("access-control-allow-origin") != origin
