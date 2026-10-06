@@ -114,6 +114,11 @@ class ContentBlockManager:
             return None
 
         state.task_arg_buffer += args
+
+        # Fast path heuristic to avoid expensive exception overhead on clearly incomplete JSON chunks
+        if not state.task_arg_buffer.strip().endswith("}"):
+            return None
+
         try:
             args_json = json.loads(state.task_arg_buffer)
         except Exception:
