@@ -218,6 +218,11 @@ class OpenAIChatTransport(BaseProvider):
                 return
 
             buffered_args = tool_argument_alias_buffers.get(tc_index, "") + args
+            # Performance optimization: skip guaranteed-to-fail json.loads on incomplete chunks
+            if not buffered_args.strip().endswith("}"):
+                tool_argument_alias_buffers[tc_index] = buffered_args
+                return
+
             restored = self._restore_aliased_tool_arguments(buffered_args, aliases)
             if restored is None:
                 tool_argument_alias_buffers[tc_index] = buffered_args
