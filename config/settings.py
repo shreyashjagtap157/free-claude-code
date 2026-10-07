@@ -373,7 +373,7 @@ class Settings(BaseSettings):
 
     @field_validator("cors_origins", "allowed_hosts", mode="before")
     @classmethod
-    def parse_comma_separated_list(cls, v: Any) -> list[str]:
+    def parse_comma_separated_list_fallback(cls, v: Any) -> list[str]:
         if not v:
             return ["*"]
         if isinstance(v, list):
@@ -400,7 +400,7 @@ class Settings(BaseSettings):
 
     @field_validator("cors_origins", "allowed_hosts", mode="before")
     @classmethod
-    def parse_comma_separated_list(cls, v: Any) -> list[str]:
+    def parse_comma_separated_list_strings(cls, v: Any) -> list[str]:
         if isinstance(v, str):
             return [part.strip() for part in v.split(",") if part.strip()]
         if isinstance(v, list):
@@ -434,7 +434,7 @@ class Settings(BaseSettings):
 
     @field_validator("cors_origins", "allowed_hosts", mode="before")
     @classmethod
-    def parse_comma_separated_list(cls, v: Any) -> list[str]:
+    def parse_comma_separated_list_strict(cls, v: Any) -> list[str]:
         if isinstance(v, str):
             return [part.strip() for part in v.split(",") if part.strip()]
         if isinstance(v, list):
@@ -580,10 +580,14 @@ class Settings(BaseSettings):
 
     @property
     def parsed_cors_origins(self) -> list[str]:
+        if isinstance(self.cors_origins, list):
+            return self.cors_origins
         return [p.strip() for p in self.cors_origins.split(",") if p.strip()]
 
     @property
     def parsed_trusted_hosts(self) -> list[str]:
+        if isinstance(self.trusted_hosts, list):
+            return self.trusted_hosts
         return [p.strip() for p in self.trusted_hosts.split(",") if p.strip()]
 
     @staticmethod
