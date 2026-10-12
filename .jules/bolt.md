@@ -22,3 +22,6 @@
 ## 2024-05-25 - Avoid Eager Dictionary Allocation in High-Frequency Streams
 **Learning:** In high-frequency loops, such as parsing SSE stream chunks, using `dict.get("key", {})` creates a new empty dictionary object on *every single iteration* when the key does not exist. This results in significant unnecessary memory allocation and garbage collection overhead.
 **Action:** Replace `dict.get("key", {})` with `dict.get("key")` (which returns `None`) in hot loops. If an object requires subsequent dictionary access, use a strict `None` check (`if val is None: val = {}`) or rely on truthiness (`isinstance(val, dict)` evaluates to `False` for `None`) to safely handle missing keys without fallback allocation.
+## 2024-10-12 - Avoid High-Frequency JSON Decode Exceptions in Stream Parsing
+**Learning:** In high-frequency loops (like processing SSE stream chunks), using `try: json.loads(buffer) except Exception:` on incomplete JSON strings causes Python to continually raise and catch `JSONDecodeError` exceptions. This exception handling mechanism is computationally expensive and introduces measurable overhead.
+**Action:** Use fast string heuristics, such as `if not buffer.strip().endswith("}"): return None`, to bypass the parsing attempt until the chunk appears structurally complete. Do not apply this heuristic to fully-formed JSON payloads.
