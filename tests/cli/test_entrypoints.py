@@ -44,8 +44,6 @@ def _run_init(tmp_home: Path) -> tuple[str, Path]:
     return "\n".join(printed), env_file
 
 
-
-
 def test_init_creates_env_file(tmp_path: Path) -> None:
     """init() creates .env from the bundled template when it doesn't exist yet."""
     output, env_file = _run_init(tmp_path)
