@@ -114,6 +114,11 @@ class ContentBlockManager:
             return None
 
         state.task_arg_buffer += args
+        # Performance optimization: fast string heuristic to avoid json.loads exception overhead
+        # on incomplete chunks. In Anthropic SSE, tool arguments are always JSON objects.
+        if not state.task_arg_buffer.strip().endswith("}"):
+            return None
+
         try:
             args_json = json.loads(state.task_arg_buffer)
         except Exception:
