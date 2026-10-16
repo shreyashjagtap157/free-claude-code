@@ -22,3 +22,7 @@
 ## 2024-05-25 - Avoid Eager Dictionary Allocation in High-Frequency Streams
 **Learning:** In high-frequency loops, such as parsing SSE stream chunks, using `dict.get("key", {})` creates a new empty dictionary object on *every single iteration* when the key does not exist. This results in significant unnecessary memory allocation and garbage collection overhead.
 **Action:** Replace `dict.get("key", {})` with `dict.get("key")` (which returns `None`) in hot loops. If an object requires subsequent dictionary access, use a strict `None` check (`if val is None: val = {}`) or rely on truthiness (`isinstance(val, dict)` evaluates to `False` for `None`) to safely handle missing keys without fallback allocation.
+
+## 2024-10-16 - Avoid JSONDecodeError Overheads in High-Frequency Streaming
+**Learning:** Continually raising and catching `JSONDecodeError` exceptions when buffering incomplete streamed JSON chunks introduces severe computational overhead.
+**Action:** When buffering streamed JSON chunks, use fast string heuristics (like checking if the buffer ends with `"}"`) to bypass parsing attempts until the chunk appears structurally complete.

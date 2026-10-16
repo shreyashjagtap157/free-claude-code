@@ -114,6 +114,13 @@ class ContentBlockManager:
             return None
 
         state.task_arg_buffer += args
+
+        # ⚡ Bolt Optimization: Fast string heuristic check to bypass expensive
+        # json.loads() and JSONDecodeError overhead on incomplete JSON stream chunks.
+        # rstrip() is used instead of strip() to avoid unnecessary full-string copies.
+        if not state.task_arg_buffer.rstrip().endswith("}"):
+            return None
+
         try:
             args_json = json.loads(state.task_arg_buffer)
         except Exception:
