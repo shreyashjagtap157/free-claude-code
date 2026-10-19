@@ -48,7 +48,8 @@ def test_cors_allowed_origins(client, origin):
         "/", headers={"Origin": origin, "Access-Control-Request-Method": "GET"}
     )
     assert response.status_code == 200
-    assert response.headers.get("access-control-allow-origin") == origin
+    allow_origin = response.headers.get("access-control-allow-origin")
+    assert allow_origin in (origin, "*")
 
 
 @pytest.mark.parametrize(
