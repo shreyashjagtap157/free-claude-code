@@ -580,11 +580,15 @@ class Settings(BaseSettings):
 
     @property
     def parsed_cors_origins(self) -> list[str]:
-        return [p.strip() for p in self.cors_origins.split(",") if p.strip()]
+        if isinstance(self.cors_origins, str):
+            return [p.strip() for p in self.cors_origins.split(",") if p.strip()]
+        return self.cors_origins
 
     @property
     def parsed_trusted_hosts(self) -> list[str]:
-        return [p.strip() for p in self.trusted_hosts.split(",") if p.strip()]
+        if isinstance(self.trusted_hosts, str):
+            return [p.strip() for p in self.trusted_hosts.split(",") if p.strip()]
+        return self.trusted_hosts
 
     @staticmethod
     def parse_provider_type(model_string: str) -> str:
