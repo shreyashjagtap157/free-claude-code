@@ -31,3 +31,7 @@
 **Vulnerability:** Missing robust CORS validation and Host header verification logic (potential DNS rebinding vulnerability in non-local environments).
 **Learning:** By default, FastAPI does not automatically protect against cross-origin resource sharing or Host header spoofing issues unless specific middlewares are added. Relying purely on internal logic without explicit framework-level middleware protection creates security gaps.
 **Prevention:** Always implement `CORSMiddleware` and `TrustedHostMiddleware` and expose their configurations (e.g., `CORS_ORIGINS`, `ALLOWED_HOSTS`) securely through Pydantic settings with appropriate comma-separated list parsing for flexibility in deployment environments.
+## 2025-02-23 - Fix hardcoded loopback restrictions and redundant middlewares
+**Vulnerability:** The proxy API had a hardcoded `allow_origin_regex` for `CORSMiddleware` restricted to loopback addresses, which broke non-local deployments. It also redundantly added multiple conflicting middlewares, risking undefined behavior.
+**Learning:** Security middlewares need to be configurable and not hardcoded to strict loopback addresses to support real-world deployments. Middlewares should be added systematically.
+**Prevention:** Use configuration via Settings class to parameterize security parameters and enforce one-time clean setup for each middleware.
