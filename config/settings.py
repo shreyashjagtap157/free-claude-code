@@ -108,9 +108,6 @@ def _removed_env_var_message(model_config: Mapping[str, Any]) -> str | None:
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
-    cors_origins: list[str] = Field(default=["*"], validation_alias="CORS_ORIGINS")
-    allowed_hosts: list[str] = Field(default=["*"], validation_alias="ALLOWED_HOSTS")
-
     # ==================== OpenRouter Config ====================
     open_router_api_key: str = Field(default="", validation_alias="OPENROUTER_API_KEY")
 
@@ -289,7 +286,6 @@ class Settings(BaseSettings):
     # Hugging Face token for faster model downloads (optional, for local Whisper)
     hf_token: str = Field(default="", validation_alias="HF_TOKEN")
 
-
     # ==================== Security Config ====================
     cors_origins: list[str] = Field(default=["*"], validation_alias="CORS_ORIGINS")
     trusted_hosts: list[str] = Field(default=["*"], validation_alias="TRUSTED_HOSTS")
@@ -315,30 +311,10 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8082
     log_file: str = "server.log"
-    cors_origins: list[str] = Field(default=["*"], validation_alias="CORS_ORIGINS")
-    allowed_hosts: list[str] = Field(default=["*"], validation_alias="ALLOWED_HOSTS")
     # Optional server API key to protect endpoints (Anthropic-style)
     # Set via env `ANTHROPIC_AUTH_TOKEN`. When empty, no auth is required.
     anthropic_auth_token: str = Field(
         default="", validation_alias="ANTHROPIC_AUTH_TOKEN"
-    )
-    cors_origins: list[str] = Field(
-        default=["*"], validation_alias="CORS_ORIGINS"
-    )
-    allowed_hosts: list[str] = Field(
-        default=["*"], validation_alias="ALLOWED_HOSTS"
-    )
-
-    # ==================== Security ====================
-    cors_origins: list[str] = Field(default=["*"], validation_alias="CORS_ORIGINS")
-    allowed_hosts: list[str] = Field(default=["*"], validation_alias="ALLOWED_HOSTS")
-
-    # ==================== Security ====================
-    cors_origins: list[str] = Field(
-        default=["*"], validation_alias="CORS_ORIGINS"
-    )
-    allowed_hosts: list[str] = Field(
-        default=["*"], validation_alias="ALLOWED_HOSTS"
     )
 
     @model_validator(mode="before")
@@ -362,7 +338,6 @@ class Settings(BaseSettings):
         return v
 
     @field_validator(
-
         "telegram_bot_token",
         "allowed_telegram_user_id",
         "discord_bot_token",
@@ -381,17 +356,6 @@ class Settings(BaseSettings):
             return None
         return v
 
-    @field_validator("cors_origins", "allowed_hosts", mode="before")
-    @classmethod
-    def parse_comma_separated_list(cls, v: Any) -> list[str]:
-        if not v:
-            return ["*"]
-        if isinstance(v, list):
-            return v
-        if isinstance(v, str):
-            return [part.strip() for part in v.split(",") if part.strip()]
-        return ["*"]
-
     @field_validator("max_message_log_entries_per_chat", mode="before")
     @classmethod
     def parse_optional_log_cap(cls, v: Any) -> Any:
@@ -407,17 +371,6 @@ class Settings(BaseSettings):
                 f"whisper_device must be 'cpu', 'cuda', or 'nvidia_nim', got {v!r}"
             )
         return v
-
-    @field_validator("cors_origins", "allowed_hosts", mode="before")
-    @classmethod
-    def parse_comma_separated_list(cls, v: Any) -> list[str]:
-        if isinstance(v, str):
-            return [part.strip() for part in v.split(",") if part.strip()]
-        if isinstance(v, list):
-            return [str(part) for part in v]
-        if v is None:
-            return ["*"]
-        return [str(v)]
 
     @field_validator("messaging_platform")
     @classmethod
@@ -441,17 +394,6 @@ class Settings(BaseSettings):
         if v <= 0:
             raise ValueError("messaging_rate_window must be > 0")
         return float(v)
-
-    @field_validator("cors_origins", "allowed_hosts", mode="before")
-    @classmethod
-    def parse_comma_separated_list(cls, v: Any) -> list[str]:
-        if isinstance(v, str):
-            return [part.strip() for part in v.split(",") if part.strip()]
-        if isinstance(v, list):
-            return v
-        if v is None:
-            return ["*"]
-        raise ValueError("Must be a comma-separated string or a list of strings")
 
     @field_validator("web_fetch_allowed_schemes")
     @classmethod
@@ -590,11 +532,11 @@ class Settings(BaseSettings):
 
     @property
     def parsed_cors_origins(self) -> list[str]:
-        return [p.strip() for p in self.cors_origins.split(",") if p.strip()]
+        return self.cors_origins
 
     @property
     def parsed_trusted_hosts(self) -> list[str]:
-        return [p.strip() for p in self.trusted_hosts.split(",") if p.strip()]
+        return self.allowed_hosts
 
     @staticmethod
     def parse_provider_type(model_string: str) -> str:
