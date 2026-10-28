@@ -31,3 +31,7 @@
 **Vulnerability:** Missing robust CORS validation and Host header verification logic (potential DNS rebinding vulnerability in non-local environments).
 **Learning:** By default, FastAPI does not automatically protect against cross-origin resource sharing or Host header spoofing issues unless specific middlewares are added. Relying purely on internal logic without explicit framework-level middleware protection creates security gaps.
 **Prevention:** Always implement `CORSMiddleware` and `TrustedHostMiddleware` and expose their configurations (e.g., `CORS_ORIGINS`, `ALLOWED_HOSTS`) securely through Pydantic settings with appropriate comma-separated list parsing for flexibility in deployment environments.
+## 2026-05-13 - FastAPI Security Configuration
+**Vulnerability:** Duplicate and conflicting middleware declarations, leading to potentially bypassable security checks (e.g. CORS) and undefined behavior due to framework overrides.
+**Learning:** Pydantic settings parsing with identical function names overrides previous definitions, causing them to be ignored. Adding identical middlewares with conflicting properties multiple times can cause runtime inconsistency and failure of security mechanisms.
+**Prevention:** Always ensure uniqueness of field validators in Pydantic. Follow the strict order of `TrustedHostMiddleware` and `CORSMiddleware` without duplicates.
