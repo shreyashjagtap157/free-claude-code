@@ -22,3 +22,7 @@
 ## 2024-05-25 - Avoid Eager Dictionary Allocation in High-Frequency Streams
 **Learning:** In high-frequency loops, such as parsing SSE stream chunks, using `dict.get("key", {})` creates a new empty dictionary object on *every single iteration* when the key does not exist. This results in significant unnecessary memory allocation and garbage collection overhead.
 **Action:** Replace `dict.get("key", {})` with `dict.get("key")` (which returns `None`) in hot loops. If an object requires subsequent dictionary access, use a strict `None` check (`if val is None: val = {}`) or rely on truthiness (`isinstance(val, dict)` evaluates to `False` for `None`) to safely handle missing keys without fallback allocation.
+
+## 2024-05-25 - Avoid Eager json.loads in High-Frequency Streams
+**Learning:** In high-frequency parsing of chunked SSE streams, `json.loads` is repeatedly called on incomplete JSON payloads (such as tool arguments). Catching `json.JSONDecodeError` adds significant latency overhead per chunk because exception instantiation and stack tracing inside Python's C-eval loop is expensive.
+**Action:** Before calling `json.loads` on streaming chunks, use a fast string heuristic (e.g. `if not buffer.rstrip().endswith("}"):`) to bypass the parsing entirely for inputs that cannot possibly be valid full objects. This acts as a fast-path filter.

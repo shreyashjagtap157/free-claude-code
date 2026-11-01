@@ -114,6 +114,11 @@ class ContentBlockManager:
             return None
 
         state.task_arg_buffer += args
+
+        # ⚡ Bolt: Fast string heuristic to avoid expensive JSONDecodeError overhead on incomplete chunks.
+        if not state.task_arg_buffer.rstrip().endswith("}"):
+            return None
+
         try:
             args_json = json.loads(state.task_arg_buffer)
         except Exception:
