@@ -157,8 +157,10 @@ class OpenAIChatTransport(BaseProvider):
             return stream, retry_body
 
     def _restore_aliased_tool_arguments(
-        self, argument_json: str, aliases: dict[str, str]
+        self, argument_json: str, aliases: dict[str, str], *, is_partial: bool = False
     ) -> str | None:
+        if is_partial and not argument_json.rstrip().endswith("}"):
+            return None
         try:
             parsed = json.loads(argument_json)
         except json.JSONDecodeError:
@@ -212,13 +214,17 @@ class OpenAIChatTransport(BaseProvider):
             aliases = {}
         if aliases:
             if tool_argument_alias_buffers is None:
-                restored = self._restore_aliased_tool_arguments(args, aliases)
+                restored = self._restore_aliased_tool_arguments(
+                    args, aliases, is_partial=False
+                )
                 if restored is not None:
                     yield sse.emit_tool_delta(tc_index, restored)
                 return
 
             buffered_args = tool_argument_alias_buffers.get(tc_index, "") + args
-            restored = self._restore_aliased_tool_arguments(buffered_args, aliases)
+            restored = self._restore_aliased_tool_arguments(
+                buffered_args, aliases, is_partial=True
+            )
             if restored is None:
                 tool_argument_alias_buffers[tc_index] = buffered_args
                 return
@@ -315,7 +321,9 @@ class OpenAIChatTransport(BaseProvider):
             aliases = tool_argument_aliases.get(state.name)
             if not aliases:
                 continue
-            restored = self._restore_aliased_tool_arguments(buffered_args, aliases)
+            restored = self._restore_aliased_tool_arguments(
+                buffered_args, aliases, is_partial=False
+            )
             yield sse.emit_tool_delta(
                 tool_index,
                 restored if restored is not None else buffered_args,
