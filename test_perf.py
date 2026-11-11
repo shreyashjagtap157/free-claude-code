@@ -1,5 +1,4 @@
 import timeit
-import json
 
 setup = """
 import json
@@ -26,5 +25,6 @@ print(
     timeit.timeit(stmt_1, setup=setup, number=1000000),
 )
 print(
-    "stmt_2 (heuristic check before json.loads):", timeit.timeit(stmt_2, setup=setup, number=1000000)
+    "stmt_2 (heuristic check before json.loads):",
+    timeit.timeit(stmt_2, setup=setup, number=1000000),
 )
